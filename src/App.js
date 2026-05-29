@@ -858,7 +858,7 @@ export default function FactuCloudApp() {
   const factAuto = facturas.filter(f => f.auto).length;
 
   return (
-    <div style={{ minHeight: "100vh", background: "#08080f", color: "#d4d0c8", fontFamily: "'Georgia', 'Times New Roman', serif" }}>
+    <div translate="no" style={{ minHeight: "100vh", background: "#08080f", color: "#d4d0c8", fontFamily: "'Georgia', 'Times New Roman', serif" }}>
       <div style={{ position: "fixed", inset: 0, backgroundImage: "radial-gradient(circle, #ffffff04 1px, transparent 1px)", backgroundSize: "28px 28px", pointerEvents: "none", zIndex: 0 }} />
 
       {/* Sidebar */}
