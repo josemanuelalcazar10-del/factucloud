@@ -1,5 +1,63 @@
 import { useState, useRef, useCallback } from "react";
 
+// ════════════════════════════════════════
+// LOGIN
+// ════════════════════════════════════════
+const USUARIO = "josemanuel";
+const CONTRASENA = "realmurcia10";
+
+function Login({ onLogin }) {
+  const [user, setUser] = useState("");
+  const [pass, setPass] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleLogin = () => {
+    if (!user || !pass) { setError("Introduce usuario y contraseña"); return; }
+    setLoading(true);
+    setTimeout(() => {
+      if (user === USUARIO && pass === CONTRASENA) {
+        onLogin();
+      } else {
+        setError("Usuario o contraseña incorrectos");
+        setLoading(false);
+      }
+    }, 800);
+  };
+
+  return (
+    <div translate="no" style={{ minHeight: "100vh", background: "#08080f", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Georgia', serif" }}>
+      <div style={{ position: "fixed", inset: 0, backgroundImage: "radial-gradient(circle, #ffffff04 1px, transparent 1px)", backgroundSize: "28px 28px", pointerEvents: "none" }} />
+      <div style={{ position: "relative", zIndex: 1, width: 380 }}>
+        <div style={{ textAlign: "center", marginBottom: 40 }}>
+          <div style={{ fontSize: 10, letterSpacing: 6, color: "#f0a500", textTransform: "uppercase", fontFamily: "monospace", marginBottom: 10 }}>Facturación Inteligente</div>
+          <div style={{ fontSize: 36, fontWeight: 300 }}>
+            <span style={{ color: "#f0a500", fontWeight: 700 }}>Factu</span><span style={{ color: "#7eb8f5" }}>Cloud</span>
+          </div>
+          <div style={{ fontSize: 11, color: "#333", fontFamily: "monospace", letterSpacing: 2, marginTop: 6 }}>v1.0 · IA Integrada</div>
+        </div>
+        <div style={{ background: "#0c0c18", border: "1px solid #1e1e2e", borderRadius: 3, padding: "36px 32px" }}>
+          <div style={{ fontSize: 10, letterSpacing: 5, color: "#f0a500", textTransform: "uppercase", fontFamily: "monospace", marginBottom: 28, textAlign: "center" }}>Acceso privado</div>
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontSize: 10, color: "#444", letterSpacing: 3, fontFamily: "monospace", textTransform: "uppercase", marginBottom: 8 }}>Usuario</div>
+            <input value={user} onChange={e => { setUser(e.target.value); setError(""); }} onKeyDown={e => e.key === "Enter" && handleLogin()} placeholder="josemanuel" style={{ width: "100%", background: "#05050e", border: "1px solid #1e1e2e", color: "#ccc", padding: "12px 16px", fontSize: 14, fontFamily: "monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }} />
+          </div>
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ fontSize: 10, color: "#444", letterSpacing: 3, fontFamily: "monospace", textTransform: "uppercase", marginBottom: 8 }}>Contraseña</div>
+            <input type="password" value={pass} onChange={e => { setPass(e.target.value); setError(""); }} onKeyDown={e => e.key === "Enter" && handleLogin()} placeholder="••••••••••••" style={{ width: "100%", background: "#05050e", border: "1px solid #1e1e2e", color: "#ccc", padding: "12px 16px", fontSize: 14, fontFamily: "monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }} />
+          </div>
+          {error && <div style={{ padding: "10px 14px", background: "rgba(224,82,82,0.1)", border: "1px solid rgba(224,82,82,0.3)", color: "#e05252", fontSize: 11, fontFamily: "monospace", borderRadius: 2, marginBottom: 16, textAlign: "center" }}>✕ {error}</div>}
+          <button onClick={handleLogin} disabled={loading} style={{ width: "100%", background: loading ? "#1e1e2e" : "#f0a500", color: loading ? "#444" : "#08080f", border: "none", padding: "14px", cursor: loading ? "not-allowed" : "pointer", fontSize: 11, letterSpacing: 4, textTransform: "uppercase", fontFamily: "monospace", fontWeight: "bold", borderRadius: 2 }}>
+            {loading ? "Verificando..." : "◈ Entrar"}
+          </button>
+        </div>
+        <div style={{ textAlign: "center", marginTop: 20, fontSize: 10, color: "#1e1e2e", fontFamily: "monospace", letterSpacing: 2 }}>Acceso restringido · Solo personal autorizado</div>
+      </div>
+    </div>
+  );
+}
+
+
 const EMPRESA = { nombre: "FactuCloud", cif: "B28123456", direccion: "Calle Industria 45, 28001 Madrid", tel: "91 234 56 78", email: "josemanuelalcazar10@gmail.com", banco: "ES12 1234 5678 9012 3456 7890" };
 
 const formatEUR = (n) => new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n || 0);
@@ -839,6 +897,7 @@ function Agente({ setFacturas }) {
 // APP RAÍZ
 // ════════════════════════════════════════
 export default function FactuCloudApp() {
+  const [loggedIn, setLoggedIn] = useState(false);
   const [tab, setTab] = useState("dashboard");
   const [obras, setObras] = useState(OBRAS_INIT);
   const [clientes, setClientes] = useState(CLIENTES_INIT);
@@ -856,6 +915,8 @@ export default function FactuCloudApp() {
   ];
 
   const factAuto = facturas.filter(f => f.auto).length;
+
+  if (!loggedIn) return <Login onLogin={() => setLoggedIn(true)} />;
 
   return (
     <div translate="no" style={{ minHeight: "100vh", background: "#08080f", color: "#d4d0c8", fontFamily: "'Georgia', 'Times New Roman', serif" }}>
