@@ -906,11 +906,14 @@ export default function FactuCloudApp() {
 
   const TABS = [
     { id: "dashboard", icon: "◈", label: "Dashboard" },
+    { id: "analitica", icon: "📊", label: "Analítica" },
     { id: "obras", icon: "⬡", label: "Obras" },
     { id: "proveedores", icon: "◆", label: "Proveedores" },
     { id: "clientes", icon: "◉", label: "Clientes" },
+    { id: "nominas", icon: "👷", label: "Nóminas" },
     { id: "presupuestos", icon: "✦", label: "Presupuestos" },
     { id: "contabilidad", icon: "≋", label: "Contabilidad" },
+    { id: "documentos", icon: "📄", label: "Documentos" },
     { id: "agente", icon: "⚡", label: "Agente IA" },
   ];
 
@@ -955,15 +958,421 @@ export default function FactuCloudApp() {
       {/* Contenido */}
       <div style={{ marginLeft: 220, padding: "36px 40px", position: "relative", zIndex: 1, minHeight: "100vh" }}>
         {tab === "dashboard" && <Dashboard obras={obras} facturas={facturas} proveedores={proveedores} setTab={setTab} />}
+        {tab === "analitica" && <Analitica facturas={facturas} obras={obras} />}
         {tab === "obras" && <Obras obras={obras} setObras={setObras} />}
         {tab === "proveedores" && <Proveedores proveedores={proveedores} setProveedores={setProveedores} />}
         {tab === "clientes" && <Clientes clientes={clientes} setClientes={setClientes} />}
+        {tab === "nominas" && <Nominas />}
         {tab === "presupuestos" && <Presupuestos />}
         {tab === "contabilidad" && <Contabilidad facturas={facturas} setFacturas={setFacturas} />}
+        {tab === "documentos" && <Documentos />}
         {tab === "agente" && <Agente setFacturas={setFacturas} />}
       </div>
 
       <style>{`* { box-sizing: border-box; } ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: #050510; } ::-webkit-scrollbar-thumb { background: #111120; }`}</style>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════
+// MÓDULO NÓMINAS Y RRHH
+// ════════════════════════════════════════
+function Nominas() {
+  const [empleados, setEmpleados] = useState([]);
+  const [nominas, setNominas] = useState([]);
+  const [subtab, setSubtab] = useState("empleados");
+  const [nuevo, setNuevo] = useState(false);
+  const [form, setForm] = useState({ nombre: "", dni: "", categoria: "", contrato: "Indefinido", salarioBruto: "", fechaAlta: "", obra: "" });
+  const [selEmp, setSelEmp] = useState(null);
+
+  const CATEGORIAS = ["Oficial 1ª", "Oficial 2ª", "Oficial 3ª", "Peón especialista", "Peón ordinario", "Encargado", "Jefe de obra", "Administrativo"];
+  const CONTRATOS = ["Indefinido", "Obra y servicio", "Temporal", "A tiempo parcial"];
+
+  const calcularNomina = (emp) => {
+    const bruto = parseFloat(emp.salarioBruto) || 0;
+    const irpf = bruto * 0.15;
+    const ssTrabajador = bruto * 0.0635;
+    const ssEmpresa = bruto * 0.2360;
+    const neto = bruto - irpf - ssTrabajador;
+    const costeEmpresa = bruto + ssEmpresa;
+    return { bruto, irpf, ssTrabajador, ssEmpresa, neto, costeEmpresa };
+  };
+
+  const guardarEmpleado = () => {
+    if (!form.nombre) return;
+    setEmpleados(prev => [...prev, { ...form, id: Date.now(), salarioBruto: parseFloat(form.salarioBruto) || 0 }]);
+    setNuevo(false);
+    setForm({ nombre: "", dni: "", categoria: "", contrato: "Indefinido", salarioBruto: "", fechaAlta: "", obra: "" });
+  };
+
+  const formatEURLocal = (n) => new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" }).format(n || 0);
+
+  const totalNominas = empleados.reduce((s, e) => s + calcularNomina(e).costeEmpresa, 0);
+  const totalNeto = empleados.reduce((s, e) => s + calcularNomina(e).neto, 0);
+  const totalSS = empleados.reduce((s, e) => s + calcularNomina(e).ssEmpresa, 0);
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+        <div style={{ fontSize: 11, letterSpacing: 6, color: "#f0a500", textTransform: "uppercase", fontFamily: "monospace" }}>— Nóminas y RRHH</div>
+        {subtab === "empleados" && <button onClick={() => setNuevo(true)} style={{ background: "#f0a500", color: "#08080f", border: "none", padding: "10px 24px", cursor: "pointer", fontSize: 11, letterSpacing: 3, textTransform: "uppercase", fontFamily: "monospace", fontWeight: "bold", borderRadius: 2 }}>+ Nuevo empleado</button>}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, marginBottom: 24 }}>
+        {[["Coste total empresa", formatEURLocal(totalNominas), "#e05252"], ["Total neto empleados", formatEURLocal(totalNeto), "#4caf7d"], ["SS empresa", formatEURLocal(totalSS), "#7eb8f5"]].map(([l, v, c]) => (
+          <div key={l} style={{ background: "#0c0c18", border: "1px solid #1e1e2e", borderTop: `2px solid ${c}`, padding: "18px 22px", borderRadius: 3 }}>
+            <div style={{ fontSize: 9, color: "#444", letterSpacing: 4, fontFamily: "monospace", textTransform: "uppercase", marginBottom: 10 }}>{l}</div>
+            <div style={{ fontSize: 22, color: c, fontWeight: 300 }}>{v}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", gap: 0, borderBottom: "1px solid #1e1e2e", marginBottom: 22 }}>
+        {[["empleados", "👷 Empleados"], ["nominas", "💰 Nóminas"], ["modelo111", "📋 Modelo 111"]].map(([id, label]) => (
+          <button key={id} onClick={() => setSubtab(id)} style={{ background: "none", border: "none", color: subtab === id ? "#f0a500" : "#444", padding: "12px 24px", cursor: "pointer", fontSize: 11, letterSpacing: 3, textTransform: "uppercase", fontFamily: "monospace", borderBottom: subtab === id ? "2px solid #f0a500" : "2px solid transparent" }}>{label}</button>
+        ))}
+      </div>
+
+      {subtab === "empleados" && (
+        <div>
+          {nuevo && (
+            <div style={{ background: "#0a0a14", border: "1px solid #f0a50033", borderRadius: 3, padding: "24px 28px", marginBottom: 20 }}>
+              <div style={{ fontSize: 10, letterSpacing: 4, color: "#f0a500", fontFamily: "monospace", textTransform: "uppercase", marginBottom: 18 }}>Nuevo empleado</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                {[["nombre", "Nombre completo"], ["dni", "DNI / NIE"], ["fechaAlta", "Fecha de alta"], ["salarioBruto", "Salario bruto mensual (€)"], ["obra", "Obra asignada"]].map(([k, label]) => (
+                  <div key={k}>
+                    <div style={{ fontSize: 10, color: "#444", fontFamily: "monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>{label}</div>
+                    <input value={form[k]} onChange={e => setForm(p => ({ ...p, [k]: e.target.value }))} style={{ width: "100%", background: "#0c0c18", border: "1px solid #1e1e2e", color: "#ccc", padding: "10px 14px", fontSize: 13, fontFamily: "monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }} />
+                  </div>
+                ))}
+                <div>
+                  <div style={{ fontSize: 10, color: "#444", fontFamily: "monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>Categoría</div>
+                  <select value={form.categoria} onChange={e => setForm(p => ({ ...p, categoria: e.target.value }))} style={{ width: "100%", background: "#0c0c18", border: "1px solid #1e1e2e", color: "#ccc", padding: "10px 14px", fontSize: 13, fontFamily: "monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }}>
+                    <option value="">Seleccionar...</option>
+                    {CATEGORIAS.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: "#444", fontFamily: "monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>Tipo contrato</div>
+                  <select value={form.contrato} onChange={e => setForm(p => ({ ...p, contrato: e.target.value }))} style={{ width: "100%", background: "#0c0c18", border: "1px solid #1e1e2e", color: "#ccc", padding: "10px 14px", fontSize: 13, fontFamily: "monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }}>
+                    {CONTRATOS.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+                <button onClick={guardarEmpleado} style={{ background: "#f0a500", color: "#08080f", border: "none", padding: "12px 28px", cursor: "pointer", fontSize: 11, letterSpacing: 3, fontFamily: "monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase" }}>✓ Guardar</button>
+                <button onClick={() => setNuevo(false)} style={{ background: "none", border: "1px solid #1e1e2e", color: "#444", padding: "12px 20px", cursor: "pointer", fontSize: 11, fontFamily: "monospace", borderRadius: 2, textTransform: "uppercase" }}>Cancelar</button>
+              </div>
+            </div>
+          )}
+
+          {empleados.length === 0 && !nuevo
+            ? <div style={{ textAlign: "center", padding: "60px 0", color: "#333", fontFamily: "monospace", fontSize: 13, letterSpacing: 3 }}>Sin empleados — pulsa "+ Nuevo empleado"</div>
+            : <div style={{ display: "grid", gap: 12 }}>
+                {empleados.map(e => {
+                  const n = calcularNomina(e);
+                  return (
+                    <div key={e.id} style={{ background: "#0c0c18", border: "1px solid #1e1e2e", borderRadius: 3, padding: "20px 24px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                        <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+                          <div style={{ width: 44, height: 44, borderRadius: "50%", background: "#f0a50015", border: "1px solid #f0a50033", display: "flex", alignItems: "center", justifyContent: "center", color: "#f0a500", fontSize: 18 }}>{e.nombre[0]}</div>
+                          <div>
+                            <div style={{ fontSize: 15, color: "#d4d0c8", marginBottom: 3 }}>{e.nombre}</div>
+                            <div style={{ fontSize: 11, color: "#444", fontFamily: "monospace" }}>{e.categoria} · {e.contrato} · {e.obra || "Sin obra asignada"}</div>
+                          </div>
+                        </div>
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontSize: 11, color: "#444", fontFamily: "monospace", marginBottom: 4 }}>Coste empresa</div>
+                          <div style={{ fontSize: 20, color: "#e05252" }}>{formatEURLocal(n.costeEmpresa)}</div>
+                        </div>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginTop: 16, paddingTop: 16, borderTop: "1px solid #141420" }}>
+                        {[["Bruto", formatEURLocal(n.bruto), "#aaa"], ["IRPF 15%", formatEURLocal(n.irpf), "#e05252"], ["SS trabajador", formatEURLocal(n.ssTrabajador), "#7eb8f5"], ["Neto a pagar", formatEURLocal(n.neto), "#4caf7d"]].map(([k, v, c]) => (
+                          <div key={k}>
+                            <div style={{ fontSize: 9, color: "#333", letterSpacing: 3, fontFamily: "monospace", textTransform: "uppercase", marginBottom: 4 }}>{k}</div>
+                            <div style={{ fontSize: 14, color: c }}>{v}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+          }
+        </div>
+      )}
+
+      {subtab === "nominas" && (
+        <div>
+          {empleados.length === 0
+            ? <div style={{ textAlign: "center", padding: "60px 0", color: "#333", fontFamily: "monospace", fontSize: 13, letterSpacing: 3 }}>Añade empleados primero</div>
+            : <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead><tr style={{ borderBottom: "1px solid #1e1e2e" }}>{["Empleado", "Categoría", "Bruto", "IRPF", "SS Trab.", "SS Emp.", "Neto", "Coste empresa"].map(h => <th key={h} style={{ textAlign: "left", padding: "10px 14px", fontSize: 9, letterSpacing: 3, color: "#f0a500", textTransform: "uppercase", fontFamily: "monospace", fontWeight: "normal" }}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {empleados.map(e => {
+                    const n = calcularNomina(e);
+                    return (
+                      <tr key={e.id} style={{ borderBottom: "1px solid #0e0e18" }}>
+                        <td style={{ padding: "12px 14px", color: "#ccc" }}>{e.nombre}</td>
+                        <td style={{ padding: "12px 14px", color: "#444", fontSize: 11 }}>{e.categoria}</td>
+                        <td style={{ padding: "12px 14px", color: "#aaa", fontFamily: "monospace" }}>{formatEURLocal(n.bruto)}</td>
+                        <td style={{ padding: "12px 14px", color: "#e05252", fontFamily: "monospace" }}>{formatEURLocal(n.irpf)}</td>
+                        <td style={{ padding: "12px 14px", color: "#7eb8f5", fontFamily: "monospace" }}>{formatEURLocal(n.ssTrabajador)}</td>
+                        <td style={{ padding: "12px 14px", color: "#a78bfa", fontFamily: "monospace" }}>{formatEURLocal(n.ssEmpresa)}</td>
+                        <td style={{ padding: "12px 14px", color: "#4caf7d", fontFamily: "monospace", fontWeight: "bold" }}>{formatEURLocal(n.neto)}</td>
+                        <td style={{ padding: "12px 14px", color: "#e05252", fontFamily: "monospace", fontWeight: "bold" }}>{formatEURLocal(n.costeEmpresa)}</td>
+                      </tr>
+                    );
+                  })}
+                  <tr style={{ borderTop: "2px solid #1e1e2e", background: "#0a0a14" }}>
+                    <td colSpan={2} style={{ padding: "14px", color: "#f0a500", fontFamily: "monospace", fontSize: 11, letterSpacing: 2, textTransform: "uppercase" }}>TOTAL MENSUAL</td>
+                    <td style={{ padding: "14px", color: "#aaa", fontFamily: "monospace", fontWeight: "bold" }}>{formatEURLocal(empleados.reduce((s,e)=>s+calcularNomina(e).bruto,0))}</td>
+                    <td style={{ padding: "14px", color: "#e05252", fontFamily: "monospace", fontWeight: "bold" }}>{formatEURLocal(empleados.reduce((s,e)=>s+calcularNomina(e).irpf,0))}</td>
+                    <td style={{ padding: "14px", color: "#7eb8f5", fontFamily: "monospace", fontWeight: "bold" }}>{formatEURLocal(empleados.reduce((s,e)=>s+calcularNomina(e).ssTrabajador,0))}</td>
+                    <td style={{ padding: "14px", color: "#a78bfa", fontFamily: "monospace", fontWeight: "bold" }}>{formatEURLocal(empleados.reduce((s,e)=>s+calcularNomina(e).ssEmpresa,0))}</td>
+                    <td style={{ padding: "14px", color: "#4caf7d", fontFamily: "monospace", fontWeight: "bold" }}>{formatEURLocal(totalNeto)}</td>
+                    <td style={{ padding: "14px", color: "#e05252", fontFamily: "monospace", fontWeight: "bold", fontSize: 16 }}>{formatEURLocal(totalNominas)}</td>
+                  </tr>
+                </tbody>
+              </table>
+          }
+        </div>
+      )}
+
+      {subtab === "modelo111" && (
+        <div style={{ maxWidth: 600 }}>
+          <div style={{ fontSize: 10, letterSpacing: 5, color: "#f0a500", textTransform: "uppercase", fontFamily: "monospace", marginBottom: 20 }}>Modelo 111 — Retenciones IRPF trimestral</div>
+          {[
+            ["Nº perceptores", empleados.length, "#aaa"],
+            ["Base retenciones (trimestre)", formatEURLocal(empleados.reduce((s,e)=>s+calcularNomina(e).bruto,0)*3), "#aaa"],
+            ["Total retenciones IRPF (trimestre)", formatEURLocal(empleados.reduce((s,e)=>s+calcularNomina(e).irpf,0)*3), "#e05252"],
+            ["SS empresa (trimestre)", formatEURLocal(totalSS*3), "#7eb8f5"],
+          ].map(([k, v, c]) => (
+            <div key={k} style={{ background: "#0c0c18", border: "1px solid #1e1e2e", padding: "16px 22px", borderRadius: 2, display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <span style={{ fontSize: 13, color: "#444", fontFamily: "monospace" }}>{k}</span>
+              <span style={{ fontSize: 20, color: c, fontFamily: "monospace" }}>{v}</span>
+            </div>
+          ))}
+          <div style={{ background: "#0c0c18", border: "1px solid #f0a50033", borderRadius: 2, padding: "16px 22px", marginTop: 8 }}>
+            <div style={{ fontSize: 9, color: "#f0a500", letterSpacing: 4, fontFamily: "monospace", textTransform: "uppercase", marginBottom: 8 }}>◈ Aviso</div>
+            <p style={{ fontSize: 11, color: "#444", fontFamily: "monospace", lineHeight: 1.9, margin: 0 }}>Datos calculados con IRPF 15% y SS 23.60% empresa. Revisa con tu gestoría antes de presentar el modelo 111.</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════
+// MÓDULO DOCUMENTOS
+// ════════════════════════════════════════
+function Documentos() {
+  const [docs, setDocs] = useState([]);
+  const [nuevo, setNuevo] = useState(false);
+  const [form, setForm] = useState({ nombre: "", tipo: "Contrato", obra: "", fecha: "", vencimiento: "", notas: "" });
+  const [filtro, setFiltro] = useState("Todos");
+
+  const TIPOS = ["Contrato", "Licencia", "Seguro", "Certificado", "Presupuesto", "Acta", "Plano", "Otro"];
+  const TIPO_COL = { "Contrato": "#f0a500", "Licencia": "#7eb8f5", "Seguro": "#4caf7d", "Certificado": "#a78bfa", "Presupuesto": "#e0a020", "Acta": "#e05252", "Plano": "#4cbbaf", "Otro": "#555" };
+
+  const guardar = () => {
+    if (!form.nombre) return;
+    setDocs(prev => [...prev, { ...form, id: Date.now(), subido: new Date().toLocaleDateString("es-ES") }]);
+    setNuevo(false);
+    setForm({ nombre: "", tipo: "Contrato", obra: "", fecha: "", vencimiento: "", notas: "" });
+  };
+
+  const docsFiltrados = filtro === "Todos" ? docs : docs.filter(d => d.tipo === filtro);
+
+  const hoy = new Date();
+  const proxVencer = docs.filter(d => {
+    if (!d.vencimiento) return false;
+    const [dia, mes, anio] = d.vencimiento.split("/");
+    const fecha = new Date(anio, mes - 1, dia);
+    const diff = (fecha - hoy) / (1000 * 60 * 60 * 24);
+    return diff >= 0 && diff <= 30;
+  });
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+        <div style={{ fontSize: 11, letterSpacing: 6, color: "#f0a500", textTransform: "uppercase", fontFamily: "monospace" }}>— Gestión de documentos</div>
+        <button onClick={() => setNuevo(true)} style={{ background: "#f0a500", color: "#08080f", border: "none", padding: "10px 24px", cursor: "pointer", fontSize: 11, letterSpacing: 3, textTransform: "uppercase", fontFamily: "monospace", fontWeight: "bold", borderRadius: 2 }}>+ Nuevo documento</button>
+      </div>
+
+      {proxVencer.length > 0 && (
+        <div style={{ background: "rgba(224,122,48,0.08)", border: "1px solid rgba(224,122,48,0.3)", borderLeft: "3px solid #e07830", borderRadius: 2, padding: "14px 20px", marginBottom: 20 }}>
+          <div style={{ fontSize: 10, color: "#e07830", letterSpacing: 3, fontFamily: "monospace", textTransform: "uppercase", marginBottom: 8 }}>⚡ Próximos a vencer (30 días)</div>
+          {proxVencer.map(d => <div key={d.id} style={{ fontSize: 12, color: "#e07830", fontFamily: "monospace" }}>→ {d.nombre} · Vence: {d.vencimiento}</div>)}
+        </div>
+      )}
+
+      {nuevo && (
+        <div style={{ background: "#0a0a14", border: "1px solid #f0a50033", borderRadius: 3, padding: "24px 28px", marginBottom: 20 }}>
+          <div style={{ fontSize: 10, letterSpacing: 4, color: "#f0a500", fontFamily: "monospace", textTransform: "uppercase", marginBottom: 18 }}>Nuevo documento</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            {[["nombre", "Nombre del documento"], ["obra", "Obra relacionada"], ["fecha", "Fecha del documento"], ["vencimiento", "Fecha vencimiento (opcional)"], ["notas", "Notas"]].map(([k, label]) => (
+              <div key={k}>
+                <div style={{ fontSize: 10, color: "#444", fontFamily: "monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>{label}</div>
+                <input value={form[k]} onChange={e => setForm(p => ({ ...p, [k]: e.target.value }))} style={{ width: "100%", background: "#0c0c18", border: "1px solid #1e1e2e", color: "#ccc", padding: "10px 14px", fontSize: 13, fontFamily: "monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }} />
+              </div>
+            ))}
+            <div>
+              <div style={{ fontSize: 10, color: "#444", fontFamily: "monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>Tipo</div>
+              <select value={form.tipo} onChange={e => setForm(p => ({ ...p, tipo: e.target.value }))} style={{ width: "100%", background: "#0c0c18", border: "1px solid #1e1e2e", color: "#ccc", padding: "10px 14px", fontSize: 13, fontFamily: "monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }}>
+                {TIPOS.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+            <button onClick={guardar} style={{ background: "#f0a500", color: "#08080f", border: "none", padding: "12px 28px", cursor: "pointer", fontSize: 11, letterSpacing: 3, fontFamily: "monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase" }}>✓ Guardar</button>
+            <button onClick={() => setNuevo(false)} style={{ background: "none", border: "1px solid #1e1e2e", color: "#444", padding: "12px 20px", cursor: "pointer", fontSize: 11, fontFamily: "monospace", borderRadius: 2, textTransform: "uppercase" }}>Cancelar</button>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
+        {["Todos", ...TIPOS].map(t => (
+          <button key={t} onClick={() => setFiltro(t)} style={{ background: filtro === t ? "#f0a500" : "#0c0c18", color: filtro === t ? "#08080f" : "#444", border: "1px solid #1e1e2e", padding: "6px 16px", cursor: "pointer", fontSize: 10, letterSpacing: 2, fontFamily: "monospace", borderRadius: 20, textTransform: "uppercase" }}>{t}</button>
+        ))}
+      </div>
+
+      {docsFiltrados.length === 0
+        ? <div style={{ textAlign: "center", padding: "60px 0", color: "#333", fontFamily: "monospace", fontSize: 13, letterSpacing: 3 }}>Sin documentos — pulsa "+ Nuevo documento"</div>
+        : <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
+            {docsFiltrados.map(d => (
+              <div key={d.id} style={{ background: "#0c0c18", border: "1px solid #1e1e2e", borderLeft: `3px solid ${TIPO_COL[d.tipo] || "#555"}`, borderRadius: 2, padding: "18px 22px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+                  <div>
+                    <div style={{ fontSize: 14, color: "#d4d0c8", marginBottom: 4 }}>{d.nombre}</div>
+                    <div style={{ fontSize: 11, color: "#444", fontFamily: "monospace" }}>{d.obra || "Sin obra"} · {d.fecha}</div>
+                  </div>
+                  <span style={{ fontSize: 9, padding: "3px 10px", borderRadius: 20, background: `${TIPO_COL[d.tipo]}18`, color: TIPO_COL[d.tipo], letterSpacing: 1, textTransform: "uppercase", fontFamily: "monospace", border: `1px solid ${TIPO_COL[d.tipo]}33`, whiteSpace: "nowrap" }}>{d.tipo}</span>
+                </div>
+                {d.vencimiento && <div style={{ fontSize: 11, color: "#e07830", fontFamily: "monospace" }}>⏰ Vence: {d.vencimiento}</div>}
+                {d.notas && <div style={{ fontSize: 11, color: "#333", fontFamily: "monospace", marginTop: 6 }}>{d.notas}</div>}
+                <div style={{ fontSize: 10, color: "#222", fontFamily: "monospace", marginTop: 8 }}>Subido: {d.subido}</div>
+              </div>
+            ))}
+          </div>
+      }
+    </div>
+  );
+}
+
+// ════════════════════════════════════════
+// MÓDULO ANALÍTICA Y GRÁFICAS
+// ════════════════════════════════════════
+function Analitica({ facturas, obras }) {
+  const meses = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+
+  const datosIngresos = [42000, 38000, 55000, 61000, 74000, 0, 0, 0, 0, 0, 0, 0];
+  const datosGastos = [18000, 22000, 19000, 31000, 28000, 0, 0, 0, 0, 0, 0, 0];
+  const datosPrevistos = [50000, 50000, 60000, 65000, 80000, 85000, 90000, 75000, 70000, 65000, 60000, 55000];
+
+  const maxVal = Math.max(...datosIngresos, ...datosGastos, ...datosPrevistos);
+
+  const Bar2 = ({ valor, max, color, label }) => (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, flex: 1 }}>
+      <div style={{ fontSize: 9, color: "#333", fontFamily: "monospace" }}>{valor > 0 ? `${(valor/1000).toFixed(0)}k` : ""}</div>
+      <div style={{ width: "100%", height: 160, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+        <div style={{ width: "70%", height: `${max > 0 ? (valor / max) * 100 : 0}%`, background: color, borderRadius: "2px 2px 0 0", minHeight: valor > 0 ? 4 : 0, transition: "height 0.5s" }} />
+      </div>
+      <div style={{ fontSize: 9, color: "#444", fontFamily: "monospace" }}>{label}</div>
+    </div>
+  );
+
+  const totalIngresos = datosIngresos.reduce((s, v) => s + v, 0);
+  const totalGastos = datosGastos.reduce((s, v) => s + v, 0);
+  const margen = totalIngresos - totalGastos;
+  const margenPct = totalIngresos > 0 ? ((margen / totalIngresos) * 100).toFixed(1) : 0;
+
+  const formatEURLocal = (n) => new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n || 0);
+
+  return (
+    <div>
+      <div style={{ fontSize: 11, letterSpacing: 6, color: "#f0a500", textTransform: "uppercase", fontFamily: "monospace", marginBottom: 24 }}>— Analítica y gráficas</div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 28 }}>
+        {[
+          ["Ingresos acum.", formatEURLocal(totalIngresos), "#4caf7d"],
+          ["Gastos acum.", formatEURLocal(totalGastos), "#e05252"],
+          ["Margen bruto", formatEURLocal(margen), margen >= 0 ? "#4caf7d" : "#e05252"],
+          ["% Margen", `${margenPct}%`, "#f0a500"],
+        ].map(([l, v, c]) => (
+          <div key={l} style={{ background: "#0c0c18", border: "1px solid #1e1e2e", borderTop: `2px solid ${c}`, padding: "18px 22px", borderRadius: 3 }}>
+            <div style={{ fontSize: 9, color: "#444", letterSpacing: 4, fontFamily: "monospace", textTransform: "uppercase", marginBottom: 10 }}>{l}</div>
+            <div style={{ fontSize: 22, color: c, fontWeight: 300 }}>{v}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16, marginBottom: 16 }}>
+        {/* Gráfica barras */}
+        <div style={{ background: "#0c0c18", border: "1px solid #1e1e2e", borderRadius: 3, padding: "24px" }}>
+          <div style={{ fontSize: 10, letterSpacing: 4, color: "#f0a500", textTransform: "uppercase", fontFamily: "monospace", marginBottom: 20 }}>Ingresos vs Gastos por mes</div>
+          <div style={{ display: "flex", gap: 2, alignItems: "flex-end", height: 200 }}>
+            {meses.slice(0, 7).map((mes, i) => (
+              <div key={mes} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+                <div style={{ width: "100%", display: "flex", gap: 2, alignItems: "flex-end", height: 160 }}>
+                  <div style={{ flex: 1, height: `${maxVal > 0 ? (datosIngresos[i] / maxVal) * 100 : 0}%`, background: "#4caf7d", borderRadius: "2px 2px 0 0", minHeight: datosIngresos[i] > 0 ? 4 : 0 }} />
+                  <div style={{ flex: 1, height: `${maxVal > 0 ? (datosGastos[i] / maxVal) * 100 : 0}%`, background: "#e05252", borderRadius: "2px 2px 0 0", minHeight: datosGastos[i] > 0 ? 4 : 0 }} />
+                </div>
+                <div style={{ fontSize: 9, color: "#444", fontFamily: "monospace" }}>{mes}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 20, marginTop: 16 }}>
+            {[["Ingresos", "#4caf7d"], ["Gastos", "#e05252"]].map(([l, c]) => (
+              <div key={l} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div style={{ width: 10, height: 10, background: c, borderRadius: 2 }} />
+                <span style={{ fontSize: 10, color: "#444", fontFamily: "monospace" }}>{l}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Gráfica obras */}
+        <div style={{ background: "#0c0c18", border: "1px solid #1e1e2e", borderRadius: 3, padding: "24px" }}>
+          <div style={{ fontSize: 10, letterSpacing: 4, color: "#f0a500", textTransform: "uppercase", fontFamily: "monospace", marginBottom: 20 }}>Estado de obras</div>
+          {obras.length === 0
+            ? <div style={{ color: "#333", fontSize: 12, fontFamily: "monospace", textAlign: "center", paddingTop: 40 }}>Sin obras registradas</div>
+            : obras.map(o => (
+              <div key={o.id} style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                  <span style={{ fontSize: 12, color: "#ccc" }}>{o.nombre.split(" ").slice(0, 2).join(" ")}</span>
+                  <span style={{ fontSize: 11, color: o.color || "#f0a500", fontFamily: "monospace" }}>{o.progreso}%</span>
+                </div>
+                <div style={{ height: 6, background: "#1a1a22", borderRadius: 3, overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${o.progreso}%`, background: o.color || "#f0a500", borderRadius: 3 }} />
+                </div>
+              </div>
+            ))
+          }
+        </div>
+      </div>
+
+      {/* Previsión */}
+      <div style={{ background: "#0c0c18", border: "1px solid #1e1e2e", borderRadius: 3, padding: "24px" }}>
+        <div style={{ fontSize: 10, letterSpacing: 4, color: "#f0a500", textTransform: "uppercase", fontFamily: "monospace", marginBottom: 20 }}>Previsión de ingresos anual</div>
+        <div style={{ display: "flex", gap: 3, alignItems: "flex-end", height: 120 }}>
+          {meses.map((mes, i) => {
+            const isPast = i < 5;
+            const val = isPast ? datosIngresos[i] : datosPrevistos[i];
+            const maxP = Math.max(...datosPrevistos, ...datosIngresos);
+            return (
+              <div key={mes} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                <div style={{ width: "80%", height: `${maxP > 0 ? (val / maxP) * 90 : 0}%`, background: isPast ? "#f0a500" : "#f0a50033", borderRadius: "2px 2px 0 0", minHeight: val > 0 ? 4 : 0, border: !isPast ? "1px dashed #f0a50066" : "none" }} />
+                <div style={{ fontSize: 8, color: "#333", fontFamily: "monospace" }}>{mes}</div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ display: "flex", gap: 20, marginTop: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 10, height: 10, background: "#f0a500", borderRadius: 2 }} /><span style={{ fontSize: 10, color: "#444", fontFamily: "monospace" }}>Real</span></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 10, height: 10, background: "#f0a50033", border: "1px dashed #f0a500", borderRadius: 2 }} /><span style={{ fontSize: 10, color: "#444", fontFamily: "monospace" }}>Previsto</span></div>
+        </div>
+      </div>
     </div>
   );
 }
