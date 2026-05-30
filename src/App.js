@@ -979,11 +979,9 @@ export default function FactuCloudApp() {
 // ════════════════════════════════════════
 function Nominas() {
   const [empleados, setEmpleados] = useState([]);
-  const [nominas, setNominas] = useState([]);
   const [subtab, setSubtab] = useState("empleados");
   const [nuevo, setNuevo] = useState(false);
   const [form, setForm] = useState({ nombre: "", dni: "", categoria: "", contrato: "Indefinido", salarioBruto: "", fechaAlta: "", obra: "" });
-  const [selEmp, setSelEmp] = useState(null);
 
   const CATEGORIAS = ["Oficial 1ª", "Oficial 2ª", "Oficial 3ª", "Peón especialista", "Peón ordinario", "Encargado", "Jefe de obra", "Administrativo"];
   const CONTRATOS = ["Indefinido", "Obra y servicio", "Temporal", "A tiempo parcial"];
@@ -1272,17 +1270,7 @@ function Analitica({ facturas, obras }) {
 
   const maxVal = Math.max(...datosIngresos, ...datosGastos, ...datosPrevistos);
 
-  const Bar2 = ({ valor, max, color, label }) => (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, flex: 1 }}>
-      <div style={{ fontSize: 9, color: "#333", fontFamily: "monospace" }}>{valor > 0 ? `${(valor/1000).toFixed(0)}k` : ""}</div>
-      <div style={{ width: "100%", height: 160, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-        <div style={{ width: "70%", height: `${max > 0 ? (valor / max) * 100 : 0}%`, background: color, borderRadius: "2px 2px 0 0", minHeight: valor > 0 ? 4 : 0, transition: "height 0.5s" }} />
-      </div>
-      <div style={{ fontSize: 9, color: "#444", fontFamily: "monospace" }}>{label}</div>
-    </div>
-  );
-
-  const totalIngresos = datosIngresos.reduce((s, v) => s + v, 0);
+const totalIngresos = datosIngresos.reduce((s, v) => s + v, 0);
   const totalGastos = datosGastos.reduce((s, v) => s + v, 0);
   const margen = totalIngresos - totalGastos;
   const margenPct = totalIngresos > 0 ? ((margen / totalIngresos) * 100).toFixed(1) : 0;
