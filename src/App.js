@@ -12,10 +12,14 @@ const sbFetch = async (table, method = "GET", body = null, id = null) => {
     "Content-Type": "application/json",
     "apikey": SUPABASE_KEY,
     "Authorization": `Bearer ${SUPABASE_KEY}`,
-    "Prefer": method === "POST" ? "return=representation" : "return=representation",
   };
+  if (method === "POST" || method === "PATCH") headers["Prefer"] = "return=minimal";
   const res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : null });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) {
+    const err = await res.text();
+    console.error(`Supabase error [${method} ${table}]:`, err);
+    throw new Error(err);
+  }
   const text = await res.text();
   return text ? JSON.parse(text) : [];
 };
@@ -1004,42 +1008,33 @@ export default function FactuCloudApp() {
   }, [loggedIn]);
 
   // Wrappers que sincronizan con Supabase
-  const setObras = async (updater) => {
-    setObrasState(prev => {
+  const makesetter = (getState, setState, tabla) => (updater) => {
+    setState(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
-      // Sincronizar nuevos elementos
       const nuevos = next.filter(n => !prev.find(p => p.id === n.id));
-      nuevos.forEach(n => dbInsert("obras", n).catch(console.error));
+      const eliminados = prev.filter(p => !next.find(n => n.id === p.id));
+      nuevos.forEach(n => {
+        const row = { ...n, id: typeof n.id === "number" ? n.id : Number(n.id) };
+        fetch(`${SUPABASE_URL}/rest/v1/${tabla}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}`, "Prefer": "return=minimal" },
+          body: JSON.stringify(row)
+        }).catch(console.error);
+      });
+      eliminados.forEach(p => {
+        fetch(`${SUPABASE_URL}/rest/v1/${tabla}?id=eq.${p.id}`, {
+          method: "DELETE",
+          headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` }
+        }).catch(console.error);
+      });
       return next;
     });
   };
 
-  const setClientes = async (updater) => {
-    setClientesState(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      const nuevos = next.filter(n => !prev.find(p => p.id === n.id));
-      nuevos.forEach(n => dbInsert("clientes", n).catch(console.error));
-      return next;
-    });
-  };
-
-  const setProveedores = async (updater) => {
-    setProveedoresState(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      const nuevos = next.filter(n => !prev.find(p => p.id === n.id));
-      nuevos.forEach(n => dbInsert("proveedores", n).catch(console.error));
-      return next;
-    });
-  };
-
-  const setFacturas = async (updater) => {
-    setFacturasState(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      const nuevos = next.filter(n => !prev.find(p => p.id === n.id));
-      nuevos.forEach(n => dbInsert("facturas", n).catch(console.error));
-      return next;
-    });
-  };
+  const setObras = makesetter(() => obras, setObrasState, "obras");
+  const setClientes = makesetter(() => clientes, setClientesState, "clientes");
+  const setProveedores = makesetter(() => proveedores, setProveedoresState, "proveedores");
+  const setFacturas = makesetter(() => facturas, setFacturasState, "facturas");
 
   const TABS = [
     { id: "dashboard", icon: "◈", label: "Dashboard" },
