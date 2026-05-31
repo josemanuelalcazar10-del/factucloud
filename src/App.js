@@ -1,4 +1,29 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
+
+// ════════════════════════════════════════
+// SUPABASE CONFIG
+// ════════════════════════════════════════
+const SUPABASE_URL = "https://mlsvbmqpzgxlvghqsmpm.supabase.co";
+const SUPABASE_KEY = "sb_publishable_Ud7mbqoo43V-R37Fibfs0g_jwwBIYWD";
+
+const sbFetch = async (table, method = "GET", body = null, id = null) => {
+  const url = `${SUPABASE_URL}/rest/v1/${table}${id ? `?id=eq.${id}` : ""}`;
+  const headers = {
+    "Content-Type": "application/json",
+    "apikey": SUPABASE_KEY,
+    "Authorization": `Bearer ${SUPABASE_KEY}`,
+    "Prefer": method === "POST" ? "return=representation" : "return=representation",
+  };
+  const res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : null });
+  if (!res.ok) throw new Error(await res.text());
+  const text = await res.text();
+  return text ? JSON.parse(text) : [];
+};
+
+const dbGet = (table) => sbFetch(table);
+const dbInsert = (table, row) => sbFetch(table, "POST", row);
+const dbDelete = (table, id) => sbFetch(table, "DELETE", null, id);
+const dbUpdate = (table, id, row) => sbFetch(`${table}?id=eq.${id}`, "PATCH", row);
 
 // ════════════════════════════════════════
 // LOGIN
@@ -949,10 +974,72 @@ function Agente({ setFacturas }) {
 export default function FactuCloudApp() {
   const [loggedIn, setLoggedIn] = useState(false);
   const [tab, setTab] = useState("dashboard");
-  const [obras, setObras] = useState(OBRAS_INIT);
-  const [clientes, setClientes] = useState(CLIENTES_INIT);
-  const [proveedores, setProveedores] = useState(PROVEEDORES_INIT);
-  const [facturas, setFacturas] = useState(FACTURAS_INIT);
+  const [obras, setObrasState] = useState(OBRAS_INIT);
+  const [clientes, setClientesState] = useState(CLIENTES_INIT);
+  const [proveedores, setProveedoresState] = useState(PROVEEDORES_INIT);
+  const [facturas, setFacturasState] = useState(FACTURAS_INIT);
+  const [dbReady, setDbReady] = useState(false);
+  const [dbError, setDbError] = useState(false);
+
+  // Cargar datos de Supabase al hacer login
+  useEffect(() => {
+    if (!loggedIn) return;
+    const cargar = async () => {
+      try {
+        const [o, c, p, f] = await Promise.all([
+          dbGet("obras"), dbGet("clientes"), dbGet("proveedores"), dbGet("facturas")
+        ]);
+        setObrasState(o || []);
+        setClientesState(c || []);
+        setProveedoresState(p || []);
+        setFacturasState(f || []);
+        setDbReady(true);
+      } catch (e) {
+        console.error("Error cargando datos:", e);
+        setDbError(true);
+        setDbReady(true);
+      }
+    };
+    cargar();
+  }, [loggedIn]);
+
+  // Wrappers que sincronizan con Supabase
+  const setObras = async (updater) => {
+    setObrasState(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      // Sincronizar nuevos elementos
+      const nuevos = next.filter(n => !prev.find(p => p.id === n.id));
+      nuevos.forEach(n => dbInsert("obras", n).catch(console.error));
+      return next;
+    });
+  };
+
+  const setClientes = async (updater) => {
+    setClientesState(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      const nuevos = next.filter(n => !prev.find(p => p.id === n.id));
+      nuevos.forEach(n => dbInsert("clientes", n).catch(console.error));
+      return next;
+    });
+  };
+
+  const setProveedores = async (updater) => {
+    setProveedoresState(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      const nuevos = next.filter(n => !prev.find(p => p.id === n.id));
+      nuevos.forEach(n => dbInsert("proveedores", n).catch(console.error));
+      return next;
+    });
+  };
+
+  const setFacturas = async (updater) => {
+    setFacturasState(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      const nuevos = next.filter(n => !prev.find(p => p.id === n.id));
+      nuevos.forEach(n => dbInsert("facturas", n).catch(console.error));
+      return next;
+    });
+  };
 
   const TABS = [
     { id: "dashboard", icon: "◈", label: "Dashboard" },
@@ -972,6 +1059,18 @@ export default function FactuCloudApp() {
   const factAuto = facturas.filter(f => f.auto).length;
 
   if (!loggedIn) return <Login onLogin={() => setLoggedIn(true)} />;
+
+  if (!dbReady) return (
+    <div style={{ minHeight: "100vh", background: "#08080f", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "monospace" }}>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 10, letterSpacing: 6, color: "#f0a500", textTransform: "uppercase", marginBottom: 20 }}>Conectando base de datos...</div>
+        <div style={{ display: "flex", gap: 6, justifyContent: "center" }}>
+          {[0,1,2].map(i => <div key={i} style={{ width: 8, height: 8, borderRadius: "50%", background: "#f0a500", opacity: 0.3, animation: `pulse 1s ${i*0.2}s infinite` }} />)}
+        </div>
+      </div>
+      <style>{`@keyframes pulse { 0%,100%{opacity:.3} 50%{opacity:1} }`}</style>
+    </div>
+  );
 
   return (
     <div translate="no" style={{ minHeight: "100vh", background: "#08080f", color: "#d4d0c8", fontFamily: "'Georgia', 'Times New Roman', serif" }}>
@@ -997,11 +1096,11 @@ export default function FactuCloudApp() {
         </nav>
 
         <div style={{ padding: "14px 16px", borderTop: "1px solid #111120" }}>
-          <div style={{ background: "#4caf7d10", border: "1px solid #4caf7d22", borderRadius: 3, padding: "10px 14px", display: "flex", gap: 10, alignItems: "center" }}>
-            <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#4caf7d", boxShadow: "0 0 8px #4caf7d", flexShrink: 0 }} />
+          <div style={{ background: dbError ? "#e0525210" : "#4caf7d10", border: `1px solid ${dbError ? "#e0525222" : "#4caf7d22"}`, borderRadius: 3, padding: "10px 14px", display: "flex", gap: 10, alignItems: "center" }}>
+            <div style={{ width: 7, height: 7, borderRadius: "50%", background: dbError ? "#e05252" : "#4caf7d", boxShadow: `0 0 8px ${dbError ? "#e05252" : "#4caf7d"}`, flexShrink: 0 }} />
             <div>
-              <div style={{ fontSize: 10, color: "#4caf7d", letterSpacing: 2, textTransform: "uppercase", fontFamily: "monospace" }}>IA Activa</div>
-              <div style={{ fontSize: 10, color: "#333", fontFamily: "monospace", marginTop: 2 }}>{factAuto} facturas auto</div>
+              <div style={{ fontSize: 10, color: dbError ? "#e05252" : "#4caf7d", letterSpacing: 2, textTransform: "uppercase", fontFamily: "monospace" }}>{dbError ? "BD Sin conectar" : "BD Conectada"}</div>
+              <div style={{ fontSize: 10, color: "#333", fontFamily: "monospace", marginTop: 2 }}>{dbError ? "Datos en memoria" : "Supabase activo"}</div>
             </div>
           </div>
         </div>
@@ -1863,3 +1962,4 @@ function Analitica({ facturas, obras }) {
     </div>
   );
 }
+
