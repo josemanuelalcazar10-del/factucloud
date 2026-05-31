@@ -1962,4 +1962,3 @@ function Analitica({ facturas, obras }) {
     </div>
   );
 }
-
