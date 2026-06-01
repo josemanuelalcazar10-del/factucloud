@@ -2208,8 +2208,6 @@ function Nominas() {
   );
 }
 
-}
-
 // ════════════════════════════════════════
 // MÓDULO DOCUMENTOS
 function Documentos({ clientes, proveedores, obras }) {
