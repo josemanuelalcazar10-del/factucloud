@@ -25,9 +25,6 @@ const sbFetch = async (table, method = "GET", body = null, id = null) => {
 };
 
 const dbGet = (table) => sbFetch(table);
-const dbInsert = (table, row) => sbFetch(table, "POST", row);
-const dbDelete = (table, id) => sbFetch(table, "DELETE", null, id);
-const dbUpdate = (table, id, row) => sbFetch(`${table}?id=eq.${id}`, "PATCH", row);
 
 // ════════════════════════════════════════
 // LOGIN
