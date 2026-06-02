@@ -968,7 +968,7 @@ const FACTURA_PROMPT = `Eres contable de una empresa de construcción española.
 Devuelve SOLO JSON válido sin texto adicional:
 {"numeroFactura":"F2026-001","fecha":"28/05/2026","fechaVencimiento":"27/06/2026","cliente":{"nombre":"","cif":"","direccion":"","email":""},"obra":"","lineas":[{"descripcion":"","cantidad":1,"unidad":"ud","precioUnitario":0,"importe":0}],"tipoIVA":21,"tipoIRPF":15,"formaPago":"Transferencia bancaria","notas":"","sugerencias":[]}`;
 
-function Contabilidad({ facturas, setFacturas }) {
+function Contabilidad({ facturas, setFacturas, empresa: empProp }) {
   const [subtab, setSubtab] = useState("lista");
   const [input, setInput] = useState("");
   const [factura, setFactura] = useState(null);
@@ -1208,8 +1208,8 @@ function Contabilidad({ facturas, setFacturas }) {
           <div style={{ background: "#fff", border: "1px solid #e8e0d0", borderRadius: 3, padding: "40px 44px", marginBottom: 16, color: "#1a1a2e" }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 28, paddingBottom: 20, borderBottom: "2px solid #1a1a2e" }}>
               <div>
-                <div style={{ fontSize: 20, fontWeight: 400, marginBottom: 6 }}>{EMPRESA.nombre}</div>
-                <div style={{ fontSize: 11, color: "#999", fontFamily: "monospace", lineHeight: 1.9 }}><div>{EMPRESA.cif}</div><div>{EMPRESA.direccion}</div><div>{EMPRESA.email}</div></div>
+                <div style={{ fontSize: 20, fontWeight: 400, marginBottom: 6 }}>{(empProp?.nombre) || EMPRESA.nombre}</div>
+                <div style={{ fontSize: 11, color: "#999", fontFamily: "monospace", lineHeight: 1.9 }}><div>{(empProp?.cif) || EMPRESA.cif}</div><div>{(empProp?.direccion) || EMPRESA.direccion}</div><div>{(empProp?.email) || EMPRESA.email}</div></div>
               </div>
               <div style={{ textAlign: "right" }}>
                 <div style={{ fontSize: 26, color: "#c9a84c", fontFamily: "monospace", marginBottom: 6 }}>{factura.numeroFactura}</div>
@@ -1781,6 +1781,10 @@ export default function FactuCloudApp() {
   const [facturas, setFacturasState] = useState(FACTURAS_INIT);
   const [dbReady, setDbReady] = useState(false);
   const [dbError, setDbError] = useState(false);
+  const [empresa, setEmpresa] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("fc_empresa") || "null") || { nombre: "", cif: "", direccion: "", cp: "", ciudad: "", email: "", tel: "", iban: "", prefijoFactura: "F", nextNumero: 1, tipoIVA: 21 }; }
+    catch { return { nombre: "", cif: "", direccion: "", cp: "", ciudad: "", email: "", tel: "", iban: "", prefijoFactura: "F", nextNumero: 1, tipoIVA: 21 }; }
+  });
 
   // Cargar datos de Supabase al hacer login
   useEffect(() => {
@@ -1805,33 +1809,58 @@ export default function FactuCloudApp() {
   }, [loggedIn]);
 
   // Wrappers que sincronizan con Supabase
-  const makesetter = (getState, setState, tabla) => (updater) => {
-    setState(prev => {
+  const sbPost = (tabla, row) => {
+    const r = { ...row, id: typeof row.id === "number" ? row.id : Number(row.id) };
+    fetch(`${SUPABASE_URL}/rest/v1/${tabla}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}`, "Prefer": "return=minimal" },
+      body: JSON.stringify(r)
+    }).then(res => { if (!res.ok) res.text().then(t => console.error("Supabase POST error:", t)); })
+    .catch(e => console.error("Supabase fetch error:", e));
+  };
+
+  const sbDelete = (tabla, id) => {
+    fetch(`${SUPABASE_URL}/rest/v1/${tabla}?id=eq.${id}`, {
+      method: "DELETE",
+      headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` }
+    }).catch(e => console.error("Supabase delete error:", e));
+  };
+
+  const setObras = (updater) => {
+    setObrasState(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
-      const nuevos = next.filter(n => !prev.find(p => p.id === n.id));
-      const eliminados = prev.filter(p => !next.find(n => n.id === p.id));
-      nuevos.forEach(n => {
-        const row = { ...n, id: typeof n.id === "number" ? n.id : Number(n.id) };
-        fetch(`${SUPABASE_URL}/rest/v1/${tabla}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}`, "Prefer": "return=minimal" },
-          body: JSON.stringify(row)
-        }).catch(console.error);
-      });
-      eliminados.forEach(p => {
-        fetch(`${SUPABASE_URL}/rest/v1/${tabla}?id=eq.${p.id}`, {
-          method: "DELETE",
-          headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` }
-        }).catch(console.error);
-      });
+      next.filter(n => !prev.find(p => p.id === n.id)).forEach(n => sbPost("obras", n));
+      prev.filter(p => !next.find(n => n.id === p.id)).forEach(p => sbDelete("obras", p.id));
       return next;
     });
   };
 
-  const setObras = makesetter(() => obras, setObrasState, "obras");
-  const setClientes = makesetter(() => clientes, setClientesState, "clientes");
-  const setProveedores = makesetter(() => proveedores, setProveedoresState, "proveedores");
-  const setFacturas = makesetter(() => facturas, setFacturasState, "facturas");
+  const setClientes = (updater) => {
+    setClientesState(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      next.filter(n => !prev.find(p => p.id === n.id)).forEach(n => sbPost("clientes", n));
+      prev.filter(p => !next.find(n => n.id === p.id)).forEach(p => sbDelete("clientes", p.id));
+      return next;
+    });
+  };
+
+  const setProveedores = (updater) => {
+    setProveedoresState(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      next.filter(n => !prev.find(p => p.id === n.id)).forEach(n => sbPost("proveedores", n));
+      prev.filter(p => !next.find(n => n.id === p.id)).forEach(p => sbDelete("proveedores", p.id));
+      return next;
+    });
+  };
+
+  const setFacturas = (updater) => {
+    setFacturasState(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      next.filter(n => !prev.find(p => p.id === n.id)).forEach(n => sbPost("facturas", n));
+      prev.filter(p => !next.find(n => n.id === p.id)).forEach(p => sbDelete("facturas", p.id));
+      return next;
+    });
+  };
 
   const TABS = [
     { id: "dashboard", icon: "◈", label: "Dashboard" },
@@ -1888,6 +1917,9 @@ export default function FactuCloudApp() {
         </nav>
 
         <div style={{ padding: "14px 16px", borderTop: "1px solid #111120" }}>
+          <button onClick={() => setTab("ajustes")} style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", background: tab === "ajustes" ? "#f0a50010" : "none", border: "none", borderLeft: tab === "ajustes" ? "2px solid #f0a500" : "2px solid transparent", color: tab === "ajustes" ? "#f0a500" : "#555", cursor: "pointer", fontSize: 11, letterSpacing: 2, textTransform: "uppercase", fontFamily: "monospace", borderRadius: "0 3px 3px 0", textAlign: "left", marginBottom: 10 }}>
+            <span style={{ fontSize: 15 }}>⚙</span>Ajustes
+          </button>
           {dbError && (
             <div style={{ background: "#e0525210", border: "1px solid #e0525222", borderRadius: 3, padding: "10px 14px", display: "flex", gap: 10, alignItems: "center" }}>
               <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#e05252", flexShrink: 0 }} />
@@ -1911,9 +1943,10 @@ export default function FactuCloudApp() {
         {tab === "clientes" && <Clientes clientes={clientes} setClientes={setClientes} />}
         {tab === "nominas" && <Nominas />}
         {tab === "presupuestos" && <Presupuestos facturas={facturas} setFacturas={setFacturas} />}
-        {tab === "contabilidad" && <Contabilidad facturas={facturas} setFacturas={setFacturas} />}
+        {tab === "contabilidad" && <Contabilidad facturas={facturas} setFacturas={setFacturas} empresa={empresa} />}
         {tab === "documentos" && <Documentos clientes={clientes} proveedores={proveedores} obras={obras} />}
         {tab === "agente" && <Agente setFacturas={setFacturas} facturas={facturas} clientes={clientes} obras={obras} proveedores={proveedores} />}
+        {tab === "ajustes" && <Ajustes empresa={empresa} setEmpresa={emp => { setEmpresa(emp); try { localStorage.setItem("fc_empresa", JSON.stringify(emp)); } catch {} }} />}
       </div>
 
       <style>{`* { box-sizing: border-box; } ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: #050510; } ::-webkit-scrollbar-thumb { background: #111120; }`}</style>
@@ -1922,8 +1955,116 @@ export default function FactuCloudApp() {
 }
 
 // ════════════════════════════════════════
-// MÓDULO NÓMINAS Y RRHH
+// MÓDULO AJUSTES
 // ════════════════════════════════════════
+function Ajustes({ empresa, setEmpresa }) {
+  const [form, setForm] = useState({ ...empresa });
+  const [guardado, setGuardado] = useState(false);
+  const inp = { width: "100%", background: "#0c0c18", border: "1px solid #1e1e2e", color: "#ccc", padding: "10px 14px", fontSize: 13, fontFamily: "monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" };
+  const lbl = { fontSize: 10, color: "#888", fontFamily: "monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 };
+
+  const guardar = () => {
+    setEmpresa({ ...form });
+    setGuardado(true);
+    setTimeout(() => setGuardado(false), 2500);
+  };
+
+  return (
+    <div style={{ maxWidth: 780 }}>
+      <div style={{ fontSize: 11, letterSpacing: 6, color: "#f0a500", textTransform: "uppercase", fontFamily: "monospace", marginBottom: 28 }}>— Ajustes de la plataforma</div>
+
+      {/* Logo generado SVG */}
+      <div style={{ background: "#0c0c18", border: "1px solid #1e1e2e", borderRadius: 3, padding: "24px", marginBottom: 20, display: "flex", alignItems: "center", gap: 24 }}>
+        <div style={{ flexShrink: 0 }}>
+          <svg width="80" height="80" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
+            <rect width="80" height="80" rx="12" fill="#08080f"/>
+            <rect x="0" y="0" width="6" height="80" rx="3" fill="#f0a500"/>
+            <text x="42" y="32" textAnchor="middle" fontFamily="Georgia,serif" fontSize="22" fontWeight="bold" fill="#f0f0ea">FC</text>
+            <line x1="16" y1="42" x2="68" y2="42" stroke="#f0a500" strokeWidth="1.5" opacity="0.6"/>
+            <text x="42" y="58" textAnchor="middle" fontFamily="monospace" fontSize="8" fill="#888" letterSpacing="3">FACTUCLOUD</text>
+            <circle cx="64" cy="16" r="6" fill="#f0a500" opacity="0.15"/>
+            <circle cx="64" cy="16" r="3" fill="#f0a500"/>
+          </svg>
+        </div>
+        <div>
+          <div style={{ fontSize: 14, color: "#ccc", marginBottom: 6 }}>Logo de FactuCloud</div>
+          <div style={{ fontSize: 11, color: "#555", fontFamily: "monospace", lineHeight: 1.8 }}>Este logo aparecerá en tus facturas, presupuestos e informes. Puedes personalizarlo con el nombre de tu empresa en los datos de abajo.</div>
+        </div>
+      </div>
+
+      {/* Datos empresa */}
+      <div style={{ background: "#0c0c18", border: "1px solid #1e1e2e", borderTop: "2px solid #f0a500", borderRadius: 3, padding: "24px", marginBottom: 16 }}>
+        <div style={{ fontSize: 10, color: "#f0a500", letterSpacing: 4, fontFamily: "monospace", textTransform: "uppercase", marginBottom: 20 }}>Datos de la empresa</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+          {[["nombre","Nombre / Razón social"],["cif","CIF / NIF"],["email","Email de facturación"],["tel","Teléfono"],["direccion","Dirección"],["cp","Código postal"],["ciudad","Ciudad"],["iban","IBAN para cobros"]].map(([k,label]) => (
+            <div key={k}>
+              <div style={lbl}>{label}</div>
+              <input value={form[k]||""} onChange={e => setForm(p => ({...p,[k]:e.target.value}))} style={inp} placeholder={k === "nombre" ? "Tu empresa SL" : k === "cif" ? "B12345678" : ""} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Configuración facturas */}
+      <div style={{ background: "#0c0c18", border: "1px solid #1e1e2e", borderTop: "2px solid #7eb8f5", borderRadius: 3, padding: "24px", marginBottom: 16 }}>
+        <div style={{ fontSize: 10, color: "#7eb8f5", letterSpacing: 4, fontFamily: "monospace", textTransform: "uppercase", marginBottom: 20 }}>Configuración de facturas</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
+          <div>
+            <div style={lbl}>Prefijo de factura</div>
+            <input value={form.prefijoFactura||"F"} onChange={e => setForm(p => ({...p,prefijoFactura:e.target.value}))} style={inp} placeholder="F" />
+            <div style={{ fontSize: 10, color: "#555", fontFamily: "monospace", marginTop: 4 }}>Ej: F → F2026-001</div>
+          </div>
+          <div>
+            <div style={lbl}>Próximo número</div>
+            <input type="number" value={form.nextNumero||1} onChange={e => setForm(p => ({...p,nextNumero:parseInt(e.target.value)||1}))} style={inp} />
+            <div style={{ fontSize: 10, color: "#555", fontFamily: "monospace", marginTop: 4 }}>La siguiente factura será la nº {form.nextNumero||1}</div>
+          </div>
+          <div>
+            <div style={lbl}>IVA por defecto (%)</div>
+            <select value={form.tipoIVA||21} onChange={e => setForm(p => ({...p,tipoIVA:parseInt(e.target.value)}))} style={inp}>
+              <option value={21}>21% — General</option>
+              <option value={10}>10% — Reducido</option>
+              <option value={4}>4% — Superreducido</option>
+              <option value={0}>0% — Exento</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Preview factura */}
+      {form.nombre && (
+        <div style={{ background: "#0c0c18", border: "1px solid #1e1e2e", borderRadius: 3, padding: "24px", marginBottom: 16 }}>
+          <div style={{ fontSize: 10, color: "#555", letterSpacing: 4, fontFamily: "monospace", textTransform: "uppercase", marginBottom: 16 }}>Vista previa — Cabecera de factura</div>
+          <div style={{ background: "#fff", padding: "20px 24px", borderRadius: 2, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <svg width="44" height="44" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
+                <rect width="80" height="80" rx="12" fill="#08080f"/>
+                <rect x="0" y="0" width="6" height="80" rx="3" fill="#f0a500"/>
+                <text x="42" y="32" textAnchor="middle" fontFamily="Georgia,serif" fontSize="22" fontWeight="bold" fill="#f0f0ea">FC</text>
+                <line x1="16" y1="42" x2="68" y2="42" stroke="#f0a500" strokeWidth="1.5" opacity="0.6"/>
+                <text x="42" y="58" textAnchor="middle" fontFamily="monospace" fontSize="8" fill="#888" letterSpacing="3">FACTUCLOUD</text>
+              </svg>
+              <div>
+                <div style={{ fontSize: 16, color: "#1a1a2e", fontWeight: "bold" }}>{form.nombre}</div>
+                <div style={{ fontSize: 11, color: "#999" }}>{form.cif} · {form.direccion}{form.cp ? `, ${form.cp}` : ""} {form.ciudad}</div>
+                <div style={{ fontSize: 11, color: "#999" }}>{form.email} · {form.tel}</div>
+              </div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 18, color: "#c9a84c", fontFamily: "monospace" }}>{form.prefijoFactura||"F"}{new Date().getFullYear()}-{String(form.nextNumero||1).padStart(3,"0")}</div>
+              <div style={{ fontSize: 11, color: "#999" }}>{new Date().toLocaleDateString("es-ES")}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+        <button onClick={guardar} style={{ background: "#f0a500", color: "#08080f", border: "none", padding: "14px 36px", cursor: "pointer", fontSize: 11, letterSpacing: 4, fontFamily: "monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase" }}>✓ Guardar ajustes</button>
+        {guardado && <div style={{ fontSize: 12, color: "#4caf7d", fontFamily: "monospace" }}>✓ Guardado correctamente</div>}
+      </div>
+    </div>
+  );
+}
 function Nominas() {
   const [empleados, setEmpleados] = useState([]);
   const [subtab, setSubtab] = useState("empleados");
