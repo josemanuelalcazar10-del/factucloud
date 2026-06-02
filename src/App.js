@@ -337,13 +337,20 @@ function Obras({ obras, setObras }) {
 function Proveedores({ proveedores, setProveedores }) {
   const [sel, setSel] = useState(null);
   const [nuevo, setNuevo] = useState(false);
-  const [form, setForm] = useState({ nombre: "", cif: "", contacto: "", email: "", tel: "", categoria: "", tipo: "Proveedor", condicionesPago: "30 días", numeroCuenta: "" });
+  const [editando, setEditando] = useState(false);
+  const [form, setForm] = useState({ nombre: "", cif: "", contacto: "", email: "", tel: "", categoria: "", tipo: "Proveedor", condicionesPago: "30 días", numeroCuenta: "", direccion: "", cp: "", ciudad: "" });
+  const [formEdit, setFormEdit] = useState({});
   const prov = proveedores.find(p => p.id === sel);
 
   const guardar = () => {
     if (!form.nombre) return;
     setProveedores(prev => [...prev, { ...form, id: Date.now(), facturado: 0, pendiente: 0 }]);
-    setNuevo(false); setForm({ nombre: "", cif: "", contacto: "", email: "", tel: "", categoria: "", tipo: "Proveedor", condicionesPago: "30 días", numeroCuenta: "" });
+    setNuevo(false); setForm({ nombre: "", cif: "", contacto: "", email: "", tel: "", categoria: "", tipo: "Proveedor", condicionesPago: "30 días", numeroCuenta: "", direccion: "", cp: "", ciudad: "" });
+  };
+
+  const guardarEdicion = () => {
+    setProveedores(prev => prev.map(p => p.id === sel ? { ...p, ...formEdit } : p));
+    setEditando(false);
   };
 
   return (
@@ -357,7 +364,7 @@ function Proveedores({ proveedores, setProveedores }) {
         <div style={{ background: "#0a0a14", border: "1px solid #f0a50033", borderRadius: 3, padding: "24px 28px", marginBottom: 20 }}>
           <div style={{ fontSize: 10, letterSpacing: 4, color: "#f0a500", fontFamily: "monospace", textTransform: "uppercase", marginBottom: 18 }}>Nuevo proveedor</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            {[["nombre", "Nombre / Razón social"], ["cif", "CIF / NIF"], ["contacto", "Persona de contacto"], ["email", "Email"], ["tel", "Teléfono"], ["categoria", "Categoría (ej: Tecnología, Materiales...)"], ["numeroCuenta", "Número de cuenta (IBAN)"]].map(([k, label]) => (
+            {[["nombre", "Nombre / Razón social"], ["cif", "CIF / NIF"], ["contacto", "Persona de contacto"], ["email", "Email"], ["tel", "Teléfono"], ["categoria", "Categoría (ej: Tecnología, Materiales...)"], ["direccion", "Dirección de facturación"], ["cp", "Código postal"], ["ciudad", "Ciudad"], ["numeroCuenta", "Número de cuenta (IBAN)"]].map(([k, label]) => (
               <div key={k}>
                 <div style={{ fontSize: 10, color: "#444", fontFamily: "monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>{label}</div>
                 <input value={form[k]} onChange={e => setForm(p => ({ ...p, [k]: e.target.value }))} style={{ width: "100%", background: "#0c0c18", border: "1px solid #1e1e2e", color: "#ccc", padding: "10px 14px", fontSize: 13, fontFamily: "monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }} />
@@ -399,18 +406,38 @@ function Proveedores({ proveedores, setProveedores }) {
                 <div style={{ width: 48, height: 48, borderRadius: "50%", background: "#f0a50015", border: "1px solid #f0a50033", display: "flex", alignItems: "center", justifyContent: "center", color: "#f0a500", fontSize: 20, marginBottom: 16 }}>{prov.nombre[0]}</div>
                 <div style={{ fontSize: 20, color: "#f0f0ea", fontWeight: 300, marginBottom: 4 }}>{prov.nombre}</div>
                 <div style={{ fontSize: 11, color: "#333", fontFamily: "monospace", marginBottom: 24 }}>{prov.cif} · {prov.especialidad || prov.tipo}</div>
-                <div style={{ display: "grid", gap: 12, marginBottom: 20 }}>
-                  {[["Contacto", prov.contacto], ["Email", prov.email], ["Teléfono", prov.tel], ["Categoría", prov.categoria], ["Condiciones pago", prov.condicionesPago], ["Número cuenta", prov.numeroCuenta], ["Total pagado", formatEUR(prov.facturado)], ["Pendiente pago", formatEUR(prov.pendiente)]].map(([k, v]) => (
-                    <div key={k} style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #141420", paddingBottom: 10 }}>
-                      <span style={{ fontSize: 10, color: "#333", letterSpacing: 3, fontFamily: "monospace", textTransform: "uppercase" }}>{k}</span>
-                      <span style={{ fontSize: 13, color: "#aaa" }}>{v || "—"}</span>
+                {editando ? (
+                  <div>
+                    <div style={{ display: "grid", gap: 10, marginBottom: 16 }}>
+                      {[["nombre","Nombre"],["cif","CIF/NIF"],["contacto","Contacto"],["email","Email"],["tel","Teléfono"],["categoria","Categoría"],["direccion","Dirección"],["cp","Código postal"],["ciudad","Ciudad"],["condicionesPago","Condiciones pago"],["numeroCuenta","IBAN"]].map(([k,label]) => (
+                        <div key={k}>
+                          <div style={{ fontSize: 9, color: "#555", fontFamily: "monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 4 }}>{label}</div>
+                          <input value={formEdit[k]||""} onChange={e => setFormEdit(p => ({...p,[k]:e.target.value}))} style={{ width: "100%", background: "#0c0c18", border: "1px solid #1e1e2e", color: "#ccc", padding: "8px 12px", fontSize: 12, fontFamily: "monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }} />
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-                <div style={{ display: "flex", gap: 10 }}>
-                  <button onClick={() => setSel(null)} style={{ background: "none", border: "1px solid #1e1e2e", color: "#444", padding: "10px 20px", fontSize: 10, letterSpacing: 3, fontFamily: "monospace", cursor: "pointer", borderRadius: 2, textTransform: "uppercase" }}>← Volver</button>
-                  <button onClick={() => { setProveedores(prev => prev.filter(p => p.id !== prov.id)); setSel(null); }} style={{ background: "#e0525215", border: "1px solid #e0525233", color: "#e05252", padding: "10px 20px", fontSize: 10, letterSpacing: 3, fontFamily: "monospace", cursor: "pointer", borderRadius: 2, textTransform: "uppercase" }}>✕ Eliminar</button>
-                </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button onClick={guardarEdicion} style={{ background: "#f0a500", color: "#08080f", border: "none", padding: "10px 20px", cursor: "pointer", fontSize: 10, letterSpacing: 2, fontFamily: "monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase" }}>✓ Guardar</button>
+                      <button onClick={() => setEditando(false)} style={{ background: "none", border: "1px solid #1e1e2e", color: "#555", padding: "10px 16px", cursor: "pointer", fontSize: 10, fontFamily: "monospace", borderRadius: 2, textTransform: "uppercase" }}>Cancelar</button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ display: "grid", gap: 12, marginBottom: 20 }}>
+                      {[["Contacto", prov.contacto], ["Email", prov.email], ["Teléfono", prov.tel], ["Dirección", prov.direccion], ["CP / Ciudad", prov.cp ? `${prov.cp} ${prov.ciudad||""}` : prov.ciudad], ["Categoría", prov.categoria], ["Condiciones pago", prov.condicionesPago], ["Número cuenta", prov.numeroCuenta], ["Total pagado", formatEUR(prov.facturado)], ["Pendiente pago", formatEUR(prov.pendiente)]].map(([k, v]) => (
+                        <div key={k} style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #141420", paddingBottom: 10 }}>
+                          <span style={{ fontSize: 10, color: "#333", letterSpacing: 3, fontFamily: "monospace", textTransform: "uppercase" }}>{k}</span>
+                          <span style={{ fontSize: 13, color: "#aaa" }}>{v || "—"}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ display: "flex", gap: 10 }}>
+                      <button onClick={() => setSel(null)} style={{ background: "none", border: "1px solid #1e1e2e", color: "#444", padding: "10px 20px", fontSize: 10, letterSpacing: 3, fontFamily: "monospace", cursor: "pointer", borderRadius: 2, textTransform: "uppercase" }}>← Volver</button>
+                      <button onClick={() => { setFormEdit({...prov}); setEditando(true); }} style={{ background: "#f0a50015", border: "1px solid #f0a50033", color: "#f0a500", padding: "10px 20px", fontSize: 10, letterSpacing: 3, fontFamily: "monospace", cursor: "pointer", borderRadius: 2, textTransform: "uppercase" }}>✎ Editar</button>
+                      <button onClick={() => { setProveedores(prev => prev.filter(p => p.id !== prov.id)); setSel(null); }} style={{ background: "#e0525215", border: "1px solid #e0525233", color: "#e05252", padding: "10px 20px", fontSize: 10, letterSpacing: 3, fontFamily: "monospace", cursor: "pointer", borderRadius: 2, textTransform: "uppercase" }}>✕ Eliminar</button>
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -425,13 +452,20 @@ function Proveedores({ proveedores, setProveedores }) {
 function Clientes({ clientes, setClientes }) {
   const [sel, setSel] = useState(null);
   const [nuevo, setNuevo] = useState(false);
-  const [form, setForm] = useState({ nombre: "", cif: "", contacto: "", email: "", tel: "", tipo: "Promotor" });
+  const [editando, setEditando] = useState(false);
+  const [form, setForm] = useState({ nombre: "", cif: "", contacto: "", email: "", tel: "", tipo: "Promotor", direccion: "", cp: "", ciudad: "" });
+  const [formEdit, setFormEdit] = useState({});
   const cl = clientes.find(c => c.id === sel);
 
   const guardar = () => {
     if (!form.nombre) return;
     setClientes(prev => [...prev, { ...form, id: Date.now(), facturado: 0, pendiente: 0 }]);
-    setNuevo(false); setForm({ nombre: "", cif: "", contacto: "", email: "", tel: "", tipo: "Promotor" });
+    setNuevo(false); setForm({ nombre: "", cif: "", contacto: "", email: "", tel: "", tipo: "Promotor", direccion: "", cp: "", ciudad: "" });
+  };
+
+  const guardarEdicion = () => {
+    setClientes(prev => prev.map(c => c.id === sel ? { ...c, ...formEdit } : c));
+    setEditando(false);
   };
 
   return (
@@ -445,7 +479,7 @@ function Clientes({ clientes, setClientes }) {
         <div style={{ background: "#0a0a14", border: "1px solid #f0a50033", borderRadius: 3, padding: "24px 28px", marginBottom: 20 }}>
           <div style={{ fontSize: 10, letterSpacing: 4, color: "#f0a500", fontFamily: "monospace", textTransform: "uppercase", marginBottom: 18 }}>Nuevo cliente</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            {[["nombre", "Nombre / Razón social"], ["cif", "CIF / NIF"], ["contacto", "Persona de contacto"], ["email", "Email"], ["tel", "Teléfono"], ["tipo", "Tipo (Promotor/Empresa)"]].map(([k, label]) => (
+            {[["nombre", "Nombre / Razón social"], ["cif", "CIF / NIF"], ["contacto", "Persona de contacto"], ["email", "Email"], ["tel", "Teléfono"], ["tipo", "Tipo (Promotor/Empresa)"], ["direccion", "Dirección de facturación"], ["cp", "Código postal"], ["ciudad", "Ciudad"]].map(([k, label]) => (
               <div key={k}>
                 <div style={{ fontSize: 10, color: "#444", fontFamily: "monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>{label}</div>
                 <input value={form[k]} onChange={e => setForm(p => ({ ...p, [k]: e.target.value }))} style={{ width: "100%", background: "#0c0c18", border: "1px solid #1e1e2e", color: "#ccc", padding: "10px 14px", fontSize: 13, fontFamily: "monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }} />
@@ -481,18 +515,39 @@ function Clientes({ clientes, setClientes }) {
                 <div style={{ width: 48, height: 48, borderRadius: "50%", background: "#f0a50015", border: "1px solid #f0a50033", display: "flex", alignItems: "center", justifyContent: "center", color: "#f0a500", fontSize: 20, marginBottom: 16 }}>{cl.nombre[0]}</div>
                 <div style={{ fontSize: 20, color: "#f0f0ea", fontWeight: 300, marginBottom: 4 }}>{cl.nombre}</div>
                 <div style={{ fontSize: 11, color: "#333", fontFamily: "monospace", marginBottom: 24 }}>{cl.cif} · {cl.tipo}</div>
-                <div style={{ display: "grid", gap: 12, marginBottom: 20 }}>
-                  {[["Contacto", cl.contacto], ["Email", cl.email], ["Teléfono", cl.tel], ["Total facturado", formatEUR(cl.facturado)], ["Pendiente cobro", formatEUR(cl.pendiente)]].map(([k, v]) => (
-                    <div key={k} style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #141420", paddingBottom: 10 }}>
-                      <span style={{ fontSize: 10, color: "#333", letterSpacing: 3, fontFamily: "monospace", textTransform: "uppercase" }}>{k}</span>
-                      <span style={{ fontSize: 13, color: "#aaa" }}>{v || "—"}</span>
+
+                {editando ? (
+                  <div>
+                    <div style={{ display: "grid", gap: 10, marginBottom: 16 }}>
+                      {[["nombre","Nombre"],["cif","CIF/NIF"],["contacto","Contacto"],["email","Email"],["tel","Teléfono"],["tipo","Tipo"],["direccion","Dirección"],["cp","Código postal"],["ciudad","Ciudad"]].map(([k,label]) => (
+                        <div key={k}>
+                          <div style={{ fontSize: 9, color: "#555", fontFamily: "monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 4 }}>{label}</div>
+                          <input value={formEdit[k]||""} onChange={e => setFormEdit(p => ({...p,[k]:e.target.value}))} style={{ width: "100%", background: "#0c0c18", border: "1px solid #1e1e2e", color: "#ccc", padding: "8px 12px", fontSize: 12, fontFamily: "monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }} />
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-                <div style={{ display: "flex", gap: 10 }}>
-                  <button onClick={() => setSel(null)} style={{ background: "none", border: "1px solid #1e1e2e", color: "#444", padding: "10px 20px", fontSize: 10, letterSpacing: 3, fontFamily: "monospace", cursor: "pointer", borderRadius: 2, textTransform: "uppercase" }}>← Volver</button>
-                  <button onClick={() => { setClientes(prev => prev.filter(c => c.id !== cl.id)); setSel(null); }} style={{ background: "#e0525215", border: "1px solid #e0525233", color: "#e05252", padding: "10px 20px", fontSize: 10, letterSpacing: 3, fontFamily: "monospace", cursor: "pointer", borderRadius: 2, textTransform: "uppercase" }}>✕ Eliminar</button>
-                </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button onClick={guardarEdicion} style={{ background: "#f0a500", color: "#08080f", border: "none", padding: "10px 20px", cursor: "pointer", fontSize: 10, letterSpacing: 2, fontFamily: "monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase" }}>✓ Guardar</button>
+                      <button onClick={() => setEditando(false)} style={{ background: "none", border: "1px solid #1e1e2e", color: "#555", padding: "10px 16px", cursor: "pointer", fontSize: 10, fontFamily: "monospace", borderRadius: 2, textTransform: "uppercase" }}>Cancelar</button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ display: "grid", gap: 12, marginBottom: 20 }}>
+                      {[["Contacto", cl.contacto], ["Email", cl.email], ["Teléfono", cl.tel], ["Dirección", cl.direccion], ["CP / Ciudad", cl.cp ? `${cl.cp} ${cl.ciudad||""}` : cl.ciudad], ["Total facturado", formatEUR(cl.facturado)], ["Pendiente cobro", formatEUR(cl.pendiente)]].map(([k, v]) => (
+                        <div key={k} style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #141420", paddingBottom: 10 }}>
+                          <span style={{ fontSize: 10, color: "#333", letterSpacing: 3, fontFamily: "monospace", textTransform: "uppercase" }}>{k}</span>
+                          <span style={{ fontSize: 13, color: "#aaa" }}>{v || "—"}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ display: "flex", gap: 10 }}>
+                      <button onClick={() => setSel(null)} style={{ background: "none", border: "1px solid #1e1e2e", color: "#444", padding: "10px 20px", fontSize: 10, letterSpacing: 3, fontFamily: "monospace", cursor: "pointer", borderRadius: 2, textTransform: "uppercase" }}>← Volver</button>
+                      <button onClick={() => { setFormEdit({...cl}); setEditando(true); }} style={{ background: "#f0a50015", border: "1px solid #f0a50033", color: "#f0a500", padding: "10px 20px", fontSize: 10, letterSpacing: 3, fontFamily: "monospace", cursor: "pointer", borderRadius: 2, textTransform: "uppercase" }}>✎ Editar</button>
+                      <button onClick={() => { setClientes(prev => prev.filter(c => c.id !== cl.id)); setSel(null); }} style={{ background: "#e0525215", border: "1px solid #e0525233", color: "#e05252", padding: "10px 20px", fontSize: 10, letterSpacing: 3, fontFamily: "monospace", cursor: "pointer", borderRadius: 2, textTransform: "uppercase" }}>✕ Eliminar</button>
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>
