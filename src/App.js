@@ -407,7 +407,10 @@ function Proveedores({ proveedores, setProveedores }) {
                     </div>
                   ))}
                 </div>
-                <button onClick={() => setSel(null)} style={{ background: "none", border: "1px solid #1e1e2e", color: "#444", padding: "10px 20px", fontSize: 10, letterSpacing: 3, fontFamily: "monospace", cursor: "pointer", borderRadius: 2, textTransform: "uppercase" }}>← Volver</button>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button onClick={() => setSel(null)} style={{ background: "none", border: "1px solid #1e1e2e", color: "#444", padding: "10px 20px", fontSize: 10, letterSpacing: 3, fontFamily: "monospace", cursor: "pointer", borderRadius: 2, textTransform: "uppercase" }}>← Volver</button>
+                  <button onClick={() => { setProveedores(prev => prev.filter(p => p.id !== prov.id)); setSel(null); }} style={{ background: "#e0525215", border: "1px solid #e0525233", color: "#e05252", padding: "10px 20px", fontSize: 10, letterSpacing: 3, fontFamily: "monospace", cursor: "pointer", borderRadius: 2, textTransform: "uppercase" }}>✕ Eliminar</button>
+                </div>
               </div>
             )}
           </div>
@@ -486,7 +489,10 @@ function Clientes({ clientes, setClientes }) {
                     </div>
                   ))}
                 </div>
-                <button onClick={() => setSel(null)} style={{ background: "none", border: "1px solid #1e1e2e", color: "#444", padding: "10px 20px", fontSize: 10, letterSpacing: 3, fontFamily: "monospace", cursor: "pointer", borderRadius: 2, textTransform: "uppercase" }}>← Volver</button>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button onClick={() => setSel(null)} style={{ background: "none", border: "1px solid #1e1e2e", color: "#444", padding: "10px 20px", fontSize: 10, letterSpacing: 3, fontFamily: "monospace", cursor: "pointer", borderRadius: 2, textTransform: "uppercase" }}>← Volver</button>
+                  <button onClick={() => { setClientes(prev => prev.filter(c => c.id !== cl.id)); setSel(null); }} style={{ background: "#e0525215", border: "1px solid #e0525233", color: "#e05252", padding: "10px 20px", fontSize: 10, letterSpacing: 3, fontFamily: "monospace", cursor: "pointer", borderRadius: 2, textTransform: "uppercase" }}>✕ Eliminar</button>
+                </div>
               </div>
             )}
           </div>
@@ -1080,22 +1086,54 @@ function Contabilidad({ facturas, setFacturas }) {
       {subtab === "lista" && (
         facturas.length === 0
           ? <div style={{ textAlign: "center", padding: "60px 0", color: "#333", fontFamily: "monospace", fontSize: 13, letterSpacing: 3 }}>Sin facturas — usa Generar con IA o el Agente IA</div>
-          : <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead><tr style={{ borderBottom: "1px solid #1e1e2e" }}>{["Numero","Cliente","Fecha","Base","IVA","Total","Estado"].map(h => <th key={h} style={{ textAlign: "left", padding: "12px 14px", fontSize: 9, letterSpacing: 3, color: "#f0a500", textTransform: "uppercase", fontFamily: "monospace", fontWeight: "normal" }}>{h}</th>)}</tr></thead>
+          : <>
+            <div style={{ background: "#f0a50010", border: "1px solid #f0a50022", borderLeft: "3px solid #f0a500", borderRadius: 2, padding: "10px 16px", marginBottom: 16 }}>
+              <span style={{ fontSize: 11, color: "#f0a500", fontFamily: "monospace" }}>🔒 Las facturas emitidas, cobradas o pagadas no se pueden modificar. Para corregir una factura emitida, crea una factura rectificativa.</span>
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead><tr style={{ borderBottom: "1px solid #1e1e2e" }}>{["Numero","Cliente","Fecha","Base","IVA","Total","Estado",""].map(h => <th key={h} style={{ textAlign: "left", padding: "12px 14px", fontSize: 9, letterSpacing: 3, color: "#f0a500", textTransform: "uppercase", fontFamily: "monospace", fontWeight: "normal" }}>{h}</th>)}</tr></thead>
               <tbody>
-                {facturas.map(f => (
-                  <tr key={f.id} style={{ borderBottom: "1px solid #0e0e18" }}>
-                    <td style={{ padding: "13px 14px", color: "#7eb8f5", fontFamily: "monospace", fontSize: 12 }}>{f.numero || f.numeroFactura}</td>
-                    <td style={{ padding: "13px 14px", color: "#ccc" }}>{typeof f.cliente === "string" ? f.cliente : f.cliente?.nombre}</td>
-                    <td style={{ padding: "13px 14px", color: "#888", fontFamily: "monospace" }}>{f.fecha}</td>
-                    <td style={{ padding: "13px 14px", color: "#aaa", fontFamily: "monospace" }}>{formatEURd(f.base || 0)}</td>
-                    <td style={{ padding: "13px 14px", color: "#7eb8f5", fontFamily: "monospace" }}>{formatEURd(f.iva || 0)}</td>
-                    <td style={{ padding: "13px 14px", color: f.tipo === "ingreso" ? "#4caf7d" : "#e05252", fontFamily: "monospace", fontWeight: "bold" }}>{f.tipo === "ingreso" ? "+" : "-"}{formatEURd(f.total)}</td>
-                    <td style={{ padding: "13px 14px" }}><Badge label={f.estado} /></td>
-                  </tr>
-                ))}
+                {facturas.map(f => {
+                  const bloqueada = ["Emitida","Cobrada","Pagada"].includes(f.estado);
+                  return (
+                    <tr key={f.id} style={{ borderBottom: "1px solid #0e0e18", opacity: bloqueada ? 1 : 0.8 }}>
+                      <td style={{ padding: "13px 14px", color: "#7eb8f5", fontFamily: "monospace", fontSize: 12 }}>
+                        <span>{f.numero || f.numeroFactura}</span>
+                        {bloqueada && <span style={{ marginLeft: 6, fontSize: 9, color: "#333" }}>🔒</span>}
+                      </td>
+                      <td style={{ padding: "13px 14px", color: "#ccc" }}>{typeof f.cliente === "string" ? f.cliente : f.cliente?.nombre}</td>
+                      <td style={{ padding: "13px 14px", color: "#888", fontFamily: "monospace" }}>{f.fecha}</td>
+                      <td style={{ padding: "13px 14px", color: "#aaa", fontFamily: "monospace" }}>{formatEURd(f.base || 0)}</td>
+                      <td style={{ padding: "13px 14px", color: "#7eb8f5", fontFamily: "monospace" }}>{formatEURd(f.iva || 0)}</td>
+                      <td style={{ padding: "13px 14px", color: f.tipo === "ingreso" ? "#4caf7d" : "#e05252", fontFamily: "monospace", fontWeight: "bold" }}>{f.tipo === "ingreso" ? "+" : "-"}{formatEURd(f.total)}</td>
+                      <td style={{ padding: "13px 14px" }}><Badge label={f.estado} /></td>
+                      <td style={{ padding: "13px 14px" }}>
+                        {bloqueada ? (
+                          <button onClick={() => {
+                            const rect = { id: Date.now(), numero: `R-${f.numero||f.numeroFactura}`, numeroFactura: `R-${f.numero||f.numeroFactura}`, cliente: f.cliente, concepto: `RECTIFICATIVA de ${f.numero||f.numeroFactura}`, base: -(f.base||0), iva: -(f.iva||0), irpf: 0, total: -(f.total||0), fecha: new Date().toLocaleDateString("es-ES"), estado: "Emitida", tipo: f.tipo, auto: false, rectificativa: true };
+                            setFacturas(prev => [rect, ...prev]);
+                          }} style={{ background: "#e0783015", border: "1px solid #e0783033", color: "#e07830", padding: "5px 10px", cursor: "pointer", fontSize: 9, letterSpacing: 1, fontFamily: "monospace", borderRadius: 2, textTransform: "uppercase", whiteSpace: "nowrap" }}>
+                            Rectificativa
+                          </button>
+                        ) : f.estado === "Borrador" ? (
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button onClick={() => setFacturas(prev => prev.map(x => x.id === f.id ? { ...x, estado: "Emitida" } : x))} style={{ background: "#4caf7d", color: "#08080f", border: "none", padding: "5px 10px", cursor: "pointer", fontSize: 9, letterSpacing: 1, fontFamily: "monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase", whiteSpace: "nowrap" }}>
+                              Emitir
+                            </button>
+                            <button onClick={() => setFacturas(prev => prev.filter(x => x.id !== f.id))} style={{ background: "#e0525215", border: "1px solid #e0525233", color: "#e05252", padding: "5px 8px", cursor: "pointer", fontSize: 9, fontFamily: "monospace", borderRadius: 2, textTransform: "uppercase" }}>✕</button>
+                          </div>
+                        ) : (
+                          <button onClick={() => setFacturas(prev => prev.filter(x => x.id !== f.id))} style={{ background: "#e0525215", border: "1px solid #e0525233", color: "#e05252", padding: "5px 10px", cursor: "pointer", fontSize: 9, letterSpacing: 1, fontFamily: "monospace", borderRadius: 2, textTransform: "uppercase" }}>
+                            Eliminar
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
+          </>
       )}
 
       {/* GENERAR FACTURA IA */}
@@ -1154,7 +1192,14 @@ function Contabilidad({ facturas, setFacturas }) {
             </div>
           </div>
           <div style={{ display: "flex", gap: 10 }}>
-            <button onClick={confirmar} style={{ background: "#f0a500", color: "#08080f", border: "none", padding: "12px 28px", cursor: "pointer", fontSize: 11, letterSpacing: 3, fontFamily: "monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase" }}>Confirmar y guardar</button>
+            <button onClick={() => {
+              const base2 = factura.lineas.reduce((s, l) => s + l.importe, 0);
+              const iva2 = (base2 * factura.tipoIVA) / 100;
+              const irpf2 = (base2 * factura.tipoIRPF) / 100;
+              setFacturas(prev => [{ ...factura, id: Date.now(), base: base2, iva: iva2, irpf: irpf2, total: base2 + iva2 - irpf2, estado: "Borrador", tipo: "ingreso", auto: false }, ...prev]);
+              setFactura(null); setInput(""); setSubtab("lista");
+            }} style={{ background: "#1e1e2e", color: "#888", border: "1px solid #2e2e3e", padding: "12px 24px", cursor: "pointer", fontSize: 11, letterSpacing: 3, fontFamily: "monospace", borderRadius: 2, textTransform: "uppercase" }}>Guardar borrador</button>
+            <button onClick={confirmar} style={{ background: "#f0a500", color: "#08080f", border: "none", padding: "12px 28px", cursor: "pointer", fontSize: 11, letterSpacing: 3, fontFamily: "monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase" }}>✓ Emitir factura</button>
             <button onClick={() => setFactura(null)} style={{ background: "none", border: "1px solid #1e1e2e", color: "#555", padding: "12px 20px", cursor: "pointer", fontSize: 11, fontFamily: "monospace", borderRadius: 2, textTransform: "uppercase" }}>Cancelar</button>
           </div>
         </div>
