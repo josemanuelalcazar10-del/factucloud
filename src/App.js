@@ -81,7 +81,7 @@ function Login({ onLogin }) {
             <input type="password" value={pass} onChange={e => { setPass(e.target.value); setError(""); }} onKeyDown={e => e.key === "Enter" && handleLogin()} placeholder="••••••••••••" style={{ width: "100%", background: "#ffffff", border: "1px solid #e2e8f0", color: "#334155", padding: "12px 16px", fontSize: 14, fontFamily: "monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }} />
           </div>
           {error && <div style={{ padding: "10px 14px", background: "rgba(224,82,82,0.1)", border: "1px solid rgba(224,82,82,0.3)", color: "#e05252", fontSize: 11, fontFamily: "monospace", borderRadius: 2, marginBottom: 16, textAlign: "center" }}>✕ {error}</div>}
-          <button onClick={handleLogin} disabled={loading} style={{ width: "100%", background: loading ? "#e2e8f0" : "#f0a500", color: loading ? "#94a3b8" : "#1e293b", border: "none", padding: "14px", cursor: loading ? "not-allowed" : "pointer", fontSize: 13, letterSpacing: 2, textTransform: "uppercase", fontFamily: "monospace", fontWeight: "bold", borderRadius: 8 }}>{loading ? "Verificando..." : "◈ Entrar"}</button>
+          <button onClick={handleLogin} disabled={loading} style={{ width: "100%", background: loading ? "#e2e8f0" : "#f0a500", color: loading ? "#94a3b8" : "#1e293b", border: "none", padding: "14px", cursor: loading ? "not-allowed" : "pointer", fontSize: 13, letterSpacing: 2, textTransform: "uppercase", fontFamily: "monospace", fontWeight: "bold", borderRadius: 8 }}>
             {loading ? "Verificando..." : "◈ Entrar"}
           </button>
         </div>
@@ -1851,10 +1851,6 @@ export default function FactuCloudApp() {
       headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${token}` }
     }).catch(e => console.error("Supabase delete error:", e));
   };
-      method: "DELETE",
-      headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` }
-    }).catch(e => console.error("Supabase delete error:", e));
-  };
 
   const setObras = (updater) => {
     setObrasState(prev => {
@@ -2019,9 +2015,6 @@ export default function FactuCloudApp() {
         {tab === "agente" && <Agente setFacturas={setFacturas} facturas={facturas} clientes={clientes} obras={obras} proveedores={proveedores} />}
         {tab === "ajustes" && <Ajustes empresa={empresa} setEmpresa={emp => { setEmpresa(emp); try { localStorage.setItem("fc_empresa", JSON.stringify(emp)); } catch {} }} />}
       </div>
-
-      {/* Chat ayuda flotante */}
-      <ChatAyuda tabActual={tab} />
 
       <style>{`* { box-sizing: border-box; } body { font-family: 'Inter','Segoe UI',Arial,sans-serif; } ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: #f8fafc; } ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; } input,select,textarea { font-family: inherit; } button { font-family: inherit; }`}</style>
     </div>
