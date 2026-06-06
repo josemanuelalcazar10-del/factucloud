@@ -663,6 +663,8 @@ function Presupuestos({ facturas, setFacturas, lista: listaProp, setLista: setLi
     const tMat = (pres.materiales||[]).reduce((s,m)=>s+m.total,0);
     const tSub = (pres.subcontratas||[]).reduce((s,s2)=>s+s2.total,0);
     const total = pres.total || tMat + tSub;
+    const logoGuardadoP = (() => { try { return localStorage.getItem("fc_logo"); } catch { return null; } })();
+    const empresaGuardadaP = (() => { try { return JSON.parse(localStorage.getItem("fc_empresa") || "{}"); } catch { return {}; } })();
     const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Presupuesto</title>
     <style>body{font-family:Arial,sans-serif;max-width:800px;margin:20px auto;padding:30px;color:#1e293b;font-size:13px}
     .header{background:#f8f9fa;color:#f0a500;padding:24px;display:flex;justify-content:space-between;margin-bottom:24px}
@@ -675,7 +677,7 @@ function Presupuestos({ facturas, setFacturas, lista: listaProp, setLista: setLi
     .firma{margin-top:48px;display:grid;grid-template-columns:1fr 1fr;gap:40px}
     .firma-box{border-top:1px solid #ccc;padding-top:10px;font-size:11px;color:#888}
     </style></head><body>
-    <div class="header"><div><h2>FACTUCLOUD</h2><p style="margin:4px 0;font-size:11px;color:#888">Presupuesto profesional</p></div>
+    <div class="header"><div style="display:flex;align-items:center;gap:16px">${logoGuardadoP ? `<img src="${logoGuardadoP}" style="height:50px;object-fit:contain"/>` : ""}<div><h2>${empresaGuardadaP.nombre||"FACTUCLOUD"}</h2><p style="margin:4px 0;font-size:11px;color:#888">${empresaGuardadaP.cif||""} · ${empresaGuardadaP.direccion||"Presupuesto profesional"}</p></div></div>
     <div style="text-align:right"><p style="color:#f0a500;font-size:14px;margin:0">${pres.titulo}</p><p style="font-size:11px;color:#888;margin:4px 0">Valido hasta: ${pres.validez || "30 dias"}</p></div></div>
     <div style="background:#f8f8f8;padding:16px;margin-bottom:20px;display:grid;grid-template-columns:1fr 1fr;gap:16px">
       <div><div style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:2px">Proyecto</div><div style="font-size:14px;font-weight:bold;margin-top:4px">${pres.obra}</div></div>
@@ -962,7 +964,7 @@ const FACTURA_PROMPT = `Eres contable de una empresa de construcción española.
 Devuelve SOLO JSON válido sin texto adicional:
 {"numeroFactura":"F2026-001","fecha":"28/05/2026","fechaVencimiento":"27/06/2026","cliente":{"nombre":"","cif":"","direccion":"","email":""},"obra":"","lineas":[{"descripcion":"","cantidad":1,"unidad":"ud","precioUnitario":0,"importe":0}],"tipoIVA":21,"tipoIRPF":15,"formaPago":"Transferencia bancaria","notas":"","sugerencias":[]}`;
 
-function Contabilidad({ facturas, setFacturas, empresa: empProp }) {
+function Contabilidad({ facturas, setFacturas, empresa: empProp, clientes: clientesProp, proveedores: proveedoresProp }) {
   const [subtab, setSubtab] = useState("lista");
   const [input, setInput] = useState("");
   const [factura, setFactura] = useState(null);
@@ -971,6 +973,90 @@ function Contabilidad({ facturas, setFacturas, empresa: empProp }) {
   const [gastoDesc, setGastoDesc] = useState("");
   const [deduccion, setDeduccion] = useState(null);
   const [loadingDeduccion, setLoadingDeduccion] = useState(false);
+
+  // Estados factura manual cliente
+  const [formFactura, setFormFactura] = useState({
+    cliente: "", clienteManual: "", cif: "", direccion: "",
+    concepto: "", fecha: new Date().toLocaleDateString("es-ES"),
+    fechaVencimiento: "", formaPago: "Transferencia bancaria",
+    lineas: [{ descripcion: "", cantidad: 1, unidad: "ud", precioUnitario: 0 }],
+    tipoIVA: 21, tipoIRPF: 0, notas: ""
+  });
+
+  // Estados gasto manual proveedor
+  const [formGasto, setFormGasto] = useState({
+    proveedor: "", proveedorManual: "", cif: "",
+    concepto: "", fecha: new Date().toLocaleDateString("es-ES"),
+    fechaVencimiento: "", categoria: "Materiales",
+    base: "", iva: 21, total: "", notas: ""
+  });
+
+  const CATEGORIAS_GASTO = ["Materiales", "Subcontratas", "Maquinaria", "Transporte", "Alquiler", "Suministros", "Seguros", "Asesoría", "Otros gastos"];
+
+  const calcularTotalesFactura = () => {
+    const base = formFactura.lineas.reduce((s, l) => s + (parseFloat(l.cantidad)||0) * (parseFloat(l.precioUnitario)||0), 0);
+    const cuotaIVA = base * formFactura.tipoIVA / 100;
+    const cuotaIRPF = base * formFactura.tipoIRPF / 100;
+    return { base, cuotaIVA, cuotaIRPF, total: base + cuotaIVA - cuotaIRPF };
+  };
+
+  const siguienteNumero = () => {
+    const emp = empProp || {};
+    const prefijo = emp.prefijoFactura || "F";
+    const año = new Date().getFullYear();
+    const siguienteNum = (emp.nextNumero || 1) + facturas.filter(f => f.tipo === "ingreso").length;
+    return `${prefijo}${año}-${String(siguienteNum).padStart(3,"0")}`;
+  };
+
+  const guardarFacturaManual = (estado = "Borrador") => {
+    const { base, cuotaIVA, cuotaIRPF, total } = calcularTotalesFactura();
+    if (!formFactura.cliente && !formFactura.clienteManual) return;
+    if (base <= 0) return;
+    const nueva = {
+      id: Date.now(),
+      numero: siguienteNumero(),
+      numeroFactura: siguienteNumero(),
+      cliente: formFactura.cliente || formFactura.clienteManual,
+      concepto: formFactura.lineas[0]?.descripcion || formFactura.concepto,
+      obra: formFactura.concepto,
+      fecha: formFactura.fecha,
+      fechaVencimiento: formFactura.fechaVencimiento,
+      formaPago: formFactura.formaPago,
+      lineas: formFactura.lineas,
+      base, iva: cuotaIVA, irpf: cuotaIRPF, total,
+      tipoIVA: formFactura.tipoIVA, tipoIRPF: formFactura.tipoIRPF,
+      notas: formFactura.notas,
+      estado, tipo: "ingreso", auto: false, manual: true
+    };
+    setFacturas(prev => [nueva, ...prev]);
+    setFormFactura({ cliente: "", clienteManual: "", cif: "", direccion: "", concepto: "", fecha: new Date().toLocaleDateString("es-ES"), fechaVencimiento: "", formaPago: "Transferencia bancaria", lineas: [{ descripcion: "", cantidad: 1, unidad: "ud", precioUnitario: 0 }], tipoIVA: 21, tipoIRPF: 0, notas: "" });
+    setSubtab("lista");
+  };
+
+  const guardarGastoManual = () => {
+    if (!formGasto.proveedor && !formGasto.proveedorManual) return;
+    if (!formGasto.base) return;
+    const base = parseFloat(formGasto.base) || 0;
+    const cuotaIVA = base * formGasto.iva / 100;
+    const total = parseFloat(formGasto.total) || base + cuotaIVA;
+    const nuevo = {
+      id: Date.now(),
+      numero: `G${Date.now()}`,
+      numeroFactura: `G${new Date().getFullYear()}-${String(facturas.filter(f=>f.tipo==="gasto").length+1).padStart(3,"0")}`,
+      cliente: formGasto.proveedor || formGasto.proveedorManual,
+      concepto: formGasto.concepto,
+      categoria: formGasto.categoria,
+      fecha: formGasto.fecha,
+      fechaVencimiento: formGasto.fechaVencimiento,
+      base, iva: cuotaIVA, irpf: 0, total,
+      tipoIVA: formGasto.iva,
+      notas: formGasto.notas,
+      estado: "Pendiente", tipo: "gasto", auto: false, manual: true
+    };
+    setFacturas(prev => [nuevo, ...prev]);
+    setFormGasto({ proveedor: "", proveedorManual: "", cif: "", concepto: "", fecha: new Date().toLocaleDateString("es-ES"), fechaVencimiento: "", categoria: "Materiales", base: "", iva: 21, total: "", notas: "" });
+    setSubtab("lista");
+  };
 
   const hoy = new Date();
   const mes = hoy.getMonth();
@@ -1123,7 +1209,7 @@ function Contabilidad({ facturas, setFacturas, empresa: empProp }) {
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
         <div style={{ display: "flex", gap: 0, borderBottom: "1px solid #e2e8f0" }}>
-          {[["lista","Facturas"],["generar","Generar IA"],["fiscal","Fiscal"],["calendario","Calendario"],["deduccion","Deducibilidad IA"],["gestoria","Gestoria"]].map(([id, label]) => (
+          {[["lista","Facturas"],["nueva","✚ Nueva factura"],["gasto","✚ Nuevo gasto"],["generar","Generar IA"],["fiscal","Fiscal"],["calendario","Calendario"],["deduccion","Deducibilidad IA"],["gestoria","Gestoria"]].map(([id, label]) => (
             <button key={id} onClick={() => setSubtab(id)} style={{ background: "none", border: "none", color: subtab === id ? "#f0a500" : "#555", padding: "12px 16px", cursor: "pointer", fontSize: 10, letterSpacing: 2, textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace", borderBottom: subtab === id ? "2px solid #f0a500" : "2px solid transparent", whiteSpace: "nowrap" }}>{label}</button>
           ))}
         </div>
@@ -1166,7 +1252,9 @@ function Contabilidad({ facturas, setFacturas, empresa: empProp }) {
                             Rectificativa
                           </button>
                           <button onClick={() => {
-                              const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Factura ${f.numero||f.numeroFactura}</title><style>body{font-family:Arial,sans-serif;max-width:780px;margin:40px auto;padding:30px;color:#1e293b;font-size:13px}.header{display:flex;justify-content:space-between;border-bottom:2px solid #1e293b;padding-bottom:16px;margin-bottom:24px}table{width:100%;border-collapse:collapse}th{background:#1e293b;color:#f0a500;padding:10px;text-align:left;font-size:10px;text-transform:uppercase}td{padding:10px;border-bottom:1px solid #eee}.total-box{background:#1e293b;color:white;padding:16px 20px;display:flex;justify-content:space-between;margin-top:16px}</style></head><body><div class="header"><div><h2 style="margin:0;color:#f0a500">FACTUCLOUD</h2><p style="margin:4px 0;font-size:11px;color:#888">${f.fecha}</p></div><div style="text-align:right"><p style="font-size:20px;color:#1e293b;margin:0">${f.numero||f.numeroFactura}</p><p style="color:#888;font-size:11px">${f.estado}</p></div></div><p><strong>${typeof f.cliente==="string"?f.cliente:f.cliente?.nombre||""}</strong></p><table><thead><tr><th>Concepto</th><th style="text-align:right">Base</th><th style="text-align:right">IVA</th><th style="text-align:right">Total</th></tr></thead><tbody><tr><td>${f.concepto||f.obra||"Servicios"}</td><td style="text-align:right">${(f.base||0).toFixed(2)} EUR</td><td style="text-align:right">${(f.iva||0).toFixed(2)} EUR</td><td style="text-align:right;font-weight:bold">${(f.total||0).toFixed(2)} EUR</td></tr></tbody></table><div class="total-box"><span style="font-size:12px;color:#f0a500;letter-spacing:2px">TOTAL</span><span style="font-size:28px;color:#f0a500;font-weight:bold">${(f.total||0).toFixed(2)} EUR</span></div><div style="margin-top:32px;display:grid;grid-template-columns:1fr 1fr;gap:40px"><div style="border-top:1px solid #ccc;padding-top:10px;font-size:11px;color:#888">Firma cliente<br/><br/><br/>Nombre: ___________________</div><div style="border-top:1px solid #ccc;padding-top:10px;font-size:11px;color:#888">Firma empresa<br/><br/><br/>Nombre: ___________________</div></div><p style="margin-top:32px;font-size:10px;color:#aaa;text-align:center">Generado por FactuCloud · ${new Date().toLocaleDateString("es-ES")}</p></body></html>`;
+                              const logoGuardado = (() => { try { return localStorage.getItem("fc_logo"); } catch { return null; } })();
+                              const empresaGuardada = (() => { try { return JSON.parse(localStorage.getItem("fc_empresa") || "{}"); } catch { return {}; } })();
+                              const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Factura ${f.numero||f.numeroFactura}</title><style>body{font-family:Arial,sans-serif;max-width:780px;margin:40px auto;padding:30px;color:#1e293b;font-size:13px}.header{display:flex;justify-content:space-between;border-bottom:2px solid #1e293b;padding-bottom:16px;margin-bottom:24px}table{width:100%;border-collapse:collapse}th{background:#1e293b;color:#f0a500;padding:10px;text-align:left;font-size:10px;text-transform:uppercase}td{padding:10px;border-bottom:1px solid #eee}.total-box{background:#1e293b;color:white;padding:16px 20px;display:flex;justify-content:space-between;margin-top:16px}</style></head><body><div class="header"><div style="display:flex;align-items:center;gap:16px">${logoGuardado ? `<img src="${logoGuardado}" style="height:50px;object-fit:contain"/>` : ""}<div><h2 style="margin:0;color:#f0a500">${empresaGuardada.nombre||"FACTUCLOUD"}</h2><p style="margin:2px 0;font-size:11px;color:#888">${empresaGuardada.cif||""}</p><p style="margin:2px 0;font-size:11px;color:#888">${empresaGuardada.direccion||""}</p></div></div><div style="text-align:right"><p style="font-size:20px;color:#1e293b;margin:0">${f.numero||f.numeroFactura}</p><p style="color:#888;font-size:11px">${f.estado}</p></div></div><p><strong>${typeof f.cliente==="string"?f.cliente:f.cliente?.nombre||""}</strong></p><table><thead><tr><th>Concepto</th><th style="text-align:right">Base</th><th style="text-align:right">IVA</th><th style="text-align:right">Total</th></tr></thead><tbody><tr><td>${f.concepto||f.obra||"Servicios"}</td><td style="text-align:right">${(f.base||0).toFixed(2)} EUR</td><td style="text-align:right">${(f.iva||0).toFixed(2)} EUR</td><td style="text-align:right;font-weight:bold">${(f.total||0).toFixed(2)} EUR</td></tr></tbody></table><div class="total-box"><span style="font-size:12px;color:#f0a500;letter-spacing:2px">TOTAL</span><span style="font-size:28px;color:#f0a500;font-weight:bold">${(f.total||0).toFixed(2)} EUR</span></div><div style="margin-top:32px;display:grid;grid-template-columns:1fr 1fr;gap:40px"><div style="border-top:1px solid #ccc;padding-top:10px;font-size:11px;color:#888">Firma cliente<br/><br/><br/>Nombre: ___________________</div><div style="border-top:1px solid #ccc;padding-top:10px;font-size:11px;color:#888">Firma empresa<br/><br/><br/>Nombre: ___________________</div></div><p style="margin-top:32px;font-size:10px;color:#aaa;text-align:center">Generado por FactuCloud · ${new Date().toLocaleDateString("es-ES")}</p></body></html>`;
                               const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([html],{type:"text/html"})); a.download = `Factura_${(f.numero||f.numeroFactura||"").replace(/\//g,"_")}.html`; a.click();
                             }} style={{ background: "#7eb8f515", border: "1px solid #7eb8f533", color: "#7eb8f5", padding: "5px 10px", cursor: "pointer", fontSize: 9, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace", borderRadius: 2, textTransform: "uppercase", whiteSpace: "nowrap" }}>↓ PDF</button>
                           </div>
@@ -1189,6 +1277,202 @@ function Contabilidad({ facturas, setFacturas, empresa: empProp }) {
               </tbody>
             </table>
           </>
+      )}
+
+      {/* NUEVA FACTURA MANUAL */}
+      {subtab === "nueva" && (
+        <div style={{ maxWidth: 820 }}>
+          <div style={{ fontSize: 11, letterSpacing: 5, color: "#f0a500", textTransform: "uppercase", fontFamily: "'JetBrains Mono',monospace", marginBottom: 20 }}>Nueva factura a cliente</div>
+
+          {/* Datos cliente */}
+          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderTop: "2px solid #7eb8f5", borderRadius: 3, padding: "22px", marginBottom: 14 }}>
+            <div style={{ fontSize: 10, color: "#7eb8f5", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 16 }}>Datos del cliente</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              <div>
+                <div style={{ fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>Cliente</div>
+                <input value={formFactura.cliente} onChange={e => setFormFactura(p => ({...p, cliente: e.target.value}))} placeholder="Nombre del cliente o empresa" style={{ width: "100%", background: "#fff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>CIF / NIF</div>
+                <input value={formFactura.cif} onChange={e => setFormFactura(p => ({...p, cif: e.target.value}))} placeholder="B12345678" style={{ width: "100%", background: "#fff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>Fecha factura</div>
+                <input value={formFactura.fecha} onChange={e => setFormFactura(p => ({...p, fecha: e.target.value}))} style={{ width: "100%", background: "#fff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>Fecha vencimiento</div>
+                <input value={formFactura.fechaVencimiento} onChange={e => setFormFactura(p => ({...p, fechaVencimiento: e.target.value}))} placeholder="dd/mm/aaaa" style={{ width: "100%", background: "#fff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>Forma de pago</div>
+                <select value={formFactura.formaPago} onChange={e => setFormFactura(p => ({...p, formaPago: e.target.value}))} style={{ width: "100%", background: "#fff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }}>
+                  {["Transferencia bancaria","Contado","Cheque","Pagaré","Domiciliación SEPA"].map(f => <option key={f}>{f}</option>)}
+                </select>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>Dirección</div>
+                <input value={formFactura.direccion} onChange={e => setFormFactura(p => ({...p, direccion: e.target.value}))} placeholder="Dirección de facturación" style={{ width: "100%", background: "#fff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }} />
+              </div>
+            </div>
+          </div>
+
+          {/* Líneas de factura */}
+          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderTop: "2px solid #f0a500", borderRadius: 3, padding: "22px", marginBottom: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div style={{ fontSize: 10, color: "#f0a500", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase" }}>Líneas de factura</div>
+              <button onClick={() => setFormFactura(p => ({...p, lineas: [...p.lineas, { descripcion: "", cantidad: 1, unidad: "ud", precioUnitario: 0 }]}))} style={{ background: "#f0a50015", border: "1px solid #f0a50033", color: "#f0a500", padding: "6px 14px", cursor: "pointer", fontSize: 10, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>+ Añadir línea</button>
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead><tr style={{ borderBottom: "1px solid #e2e8f0" }}>
+                {["Descripción","Ud.","Cantidad","Precio/Ud.","Total",""].map((h,i) => <th key={h} style={{ padding: "8px 10px", fontSize: 9, color: "#94a3b8", letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", fontWeight: "normal", textAlign: i===0?"left":"right" }}>{h}</th>)}
+              </tr></thead>
+              <tbody>
+                {formFactura.lineas.map((l, i) => (
+                  <tr key={i} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                    <td style={{ padding: "8px 6px" }}><input value={l.descripcion} onChange={e => setFormFactura(p => ({...p, lineas: p.lineas.map((x,j) => j===i ? {...x, descripcion: e.target.value} : x)}))} placeholder="Descripción del trabajo o material" style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 2, padding: "8px 10px", fontSize: 12, fontFamily: "'JetBrains Mono',monospace", outline: "none", color: "#334155" }} /></td>
+                    <td style={{ padding: "8px 6px", width: 60 }}><input value={l.unidad} onChange={e => setFormFactura(p => ({...p, lineas: p.lineas.map((x,j) => j===i ? {...x, unidad: e.target.value} : x)}))} style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 2, padding: "8px 6px", fontSize: 12, fontFamily: "'JetBrains Mono',monospace", outline: "none", textAlign: "center", color: "#334155" }} /></td>
+                    <td style={{ padding: "8px 6px", width: 80 }}><input type="number" value={l.cantidad} onChange={e => setFormFactura(p => ({...p, lineas: p.lineas.map((x,j) => j===i ? {...x, cantidad: parseFloat(e.target.value)||0} : x)}))} style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 2, padding: "8px 6px", fontSize: 12, fontFamily: "'JetBrains Mono',monospace", outline: "none", textAlign: "right", color: "#334155" }} /></td>
+                    <td style={{ padding: "8px 6px", width: 120 }}><input type="number" value={l.precioUnitario} onChange={e => setFormFactura(p => ({...p, lineas: p.lineas.map((x,j) => j===i ? {...x, precioUnitario: parseFloat(e.target.value)||0} : x)}))} style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 2, padding: "8px 6px", fontSize: 12, fontFamily: "'JetBrains Mono',monospace", outline: "none", textAlign: "right", color: "#334155" }} /></td>
+                    <td style={{ padding: "8px 6px", textAlign: "right", fontSize: 13, color: "#f0a500", fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", width: 110 }}>{formatEURd((l.cantidad||0)*(l.precioUnitario||0))}</td>
+                    <td style={{ padding: "8px 6px", width: 30 }}>{formFactura.lineas.length > 1 && <button onClick={() => setFormFactura(p => ({...p, lineas: p.lineas.filter((_,j) => j!==i)}))} style={{ background: "none", border: "none", color: "#e05252", cursor: "pointer", fontSize: 14 }}>✕</button>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* IVA, IRPF y totales */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 3, padding: "20px" }}>
+              <div style={{ fontSize: 10, color: "#64748b", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 14 }}>Impuestos</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>IVA (%)</div>
+                  <select value={formFactura.tipoIVA} onChange={e => setFormFactura(p => ({...p, tipoIVA: parseInt(e.target.value)}))} style={{ width: "100%", background: "#fff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none" }}>
+                    <option value={21}>21% — General</option>
+                    <option value={10}>10% — Reducido</option>
+                    <option value={4}>4% — Superreducido</option>
+                    <option value={0}>0% — Exento</option>
+                  </select>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>IRPF (%)</div>
+                  <select value={formFactura.tipoIRPF} onChange={e => setFormFactura(p => ({...p, tipoIRPF: parseInt(e.target.value)}))} style={{ width: "100%", background: "#fff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none" }}>
+                    <option value={0}>0% — Sin retención</option>
+                    <option value={7}>7% — Inicio actividad</option>
+                    <option value={15}>15% — General</option>
+                    <option value={19}>19%</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6, marginTop: 12 }}>Notas</div>
+                <textarea value={formFactura.notas} onChange={e => setFormFactura(p => ({...p, notas: e.target.value}))} placeholder="Condiciones de pago, observaciones..." style={{ width: "100%", background: "#fff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px", fontSize: 12, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none", resize: "vertical", minHeight: 60, boxSizing: "border-box" }} />
+              </div>
+            </div>
+            {/* Resumen totales */}
+            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 3, padding: "20px" }}>
+              <div style={{ fontSize: 10, color: "#64748b", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 14 }}>Resumen</div>
+              {(() => {
+                const { base, cuotaIVA, cuotaIRPF, total } = calcularTotalesFactura();
+                return (
+                  <div>
+                    {[["Base imponible", formatEURd(base), "#64748b"], [`IVA (${formFactura.tipoIVA}%)`, formatEURd(cuotaIVA), "#7eb8f5"], formFactura.tipoIRPF > 0 ? [`IRPF (${formFactura.tipoIRPF}%)`, `- ${formatEURd(cuotaIRPF)}`, "#e05252"] : null].filter(Boolean).map(([l,v,c]) => (
+                      <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid #f1f5f9" }}>
+                        <span style={{ fontSize: 13, color: "#64748b", fontFamily: "'JetBrains Mono',monospace" }}>{l}</span>
+                        <span style={{ fontSize: 15, color: c, fontFamily: "'JetBrains Mono',monospace" }}>{v}</span>
+                      </div>
+                    ))}
+                    <div style={{ display: "flex", justifyContent: "space-between", padding: "14px 12px", background: "#1e293b", borderRadius: 4, marginTop: 8 }}>
+                      <span style={{ fontSize: 12, color: "#f0a500", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2 }}>TOTAL</span>
+                      <span style={{ fontSize: 22, color: "#f0a500", fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold" }}>{formatEURd(total)}</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace", marginTop: 8, textAlign: "center" }}>
+                      Nº factura: {siguienteNumero()}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+
+          {/* Botones */}
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={() => guardarFacturaManual("Borrador")} style={{ background: "#e2e8f0", color: "#64748b", border: "1px solid #2e2e3e", padding: "12px 24px", cursor: "pointer", fontSize: 11, letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>Guardar borrador</button>
+            <button onClick={() => guardarFacturaManual("Emitida")} style={{ background: "#f0a500", color: "#1e293b", border: "none", padding: "12px 28px", cursor: "pointer", fontSize: 11, letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase" }}>✓ Emitir factura</button>
+            <button onClick={() => setSubtab("lista")} style={{ background: "none", border: "1px solid #e2e8f0", color: "#94a3b8", padding: "12px 20px", cursor: "pointer", fontSize: 11, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>Cancelar</button>
+          </div>
+        </div>
+      )}
+
+      {/* NUEVO GASTO MANUAL */}
+      {subtab === "gasto" && (
+        <div style={{ maxWidth: 720 }}>
+          <div style={{ fontSize: 11, letterSpacing: 5, color: "#e05252", textTransform: "uppercase", fontFamily: "'JetBrains Mono',monospace", marginBottom: 20 }}>Nuevo gasto / factura de proveedor</div>
+
+          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderTop: "2px solid #e05252", borderRadius: 3, padding: "22px", marginBottom: 14 }}>
+            <div style={{ fontSize: 10, color: "#e05252", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 16 }}>Datos del proveedor</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              {[
+                ["proveedor", "Proveedor / Empresa", "Nombre del proveedor"],
+                ["cif", "CIF / NIF", "B12345678"],
+                ["concepto", "Concepto del gasto", "Descripción del gasto o trabajo"],
+                ["fecha", "Fecha factura", ""],
+                ["fechaVencimiento", "Fecha vencimiento pago", "dd/mm/aaaa"],
+              ].map(([k, label, placeholder]) => (
+                <div key={k}>
+                  <div style={{ fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>{label}</div>
+                  <input value={formGasto[k]} onChange={e => setFormGasto(p => ({...p, [k]: e.target.value}))} placeholder={placeholder} style={{ width: "100%", background: "#fff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }} />
+                </div>
+              ))}
+              <div>
+                <div style={{ fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>Categoría</div>
+                <select value={formGasto.categoria} onChange={e => setFormGasto(p => ({...p, categoria: e.target.value}))} style={{ width: "100%", background: "#fff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }}>
+                  {CATEGORIAS_GASTO.map(c => <option key={c}>{c}</option>)}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Importes */}
+          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderTop: "2px solid #f0a500", borderRadius: 3, padding: "22px", marginBottom: 14 }}>
+            <div style={{ fontSize: 10, color: "#f0a500", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 16 }}>Importes</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
+              <div>
+                <div style={{ fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>Base imponible (€)</div>
+                <input type="number" value={formGasto.base} onChange={e => {
+                  const base = parseFloat(e.target.value)||0;
+                  const total = base * (1 + formGasto.iva/100);
+                  setFormGasto(p => ({...p, base: e.target.value, total: total.toFixed(2)}));
+                }} placeholder="0.00" style={{ width: "100%", background: "#fff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>IVA (%)</div>
+                <select value={formGasto.iva} onChange={e => {
+                  const iva = parseInt(e.target.value);
+                  const base = parseFloat(formGasto.base)||0;
+                  setFormGasto(p => ({...p, iva, total: (base*(1+iva/100)).toFixed(2)}));
+                }} style={{ width: "100%", background: "#fff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }}>
+                  <option value={21}>21%</option><option value={10}>10%</option><option value={4}>4%</option><option value={0}>0%</option>
+                </select>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>Total factura (€)</div>
+                <input type="number" value={formGasto.total} onChange={e => setFormGasto(p => ({...p, total: e.target.value}))} placeholder="0.00" style={{ width: "100%", background: "#fff", border: "2px solid #f0a50066", color: "#f0a500", padding: "10px 14px", fontSize: 15, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none", boxSizing: "border-box", fontWeight: "bold" }} />
+              </div>
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>Notas</div>
+              <textarea value={formGasto.notas} onChange={e => setFormGasto(p => ({...p, notas: e.target.value}))} placeholder="Número de factura del proveedor, observaciones..." style={{ width: "100%", background: "#fff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px", fontSize: 12, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none", resize: "vertical", minHeight: 60, boxSizing: "border-box" }} />
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={guardarGastoManual} style={{ background: "#e05252", color: "#fff", border: "none", padding: "12px 28px", cursor: "pointer", fontSize: 11, letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase" }}>✓ Registrar gasto</button>
+            <button onClick={() => setSubtab("lista")} style={{ background: "none", border: "1px solid #e2e8f0", color: "#94a3b8", padding: "12px 20px", cursor: "pointer", fontSize: 11, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>Cancelar</button>
+          </div>
+        </div>
       )}
 
       {/* GENERAR FACTURA IA */}
@@ -2105,7 +2389,7 @@ export default function FactuCloudApp() {
         {tab === "clientes" && <Clientes clientes={clientes} setClientes={setClientes} />}
         {tab === "nominas" && <Nominas empleados={empleados} setEmpleados={setEmpleados} />}
         {tab === "presupuestos" && <Presupuestos facturas={facturas} setFacturas={setFacturas} lista={presupuestosList} setLista={setPresupuestos} />}
-        {tab === "contabilidad" && <Contabilidad facturas={facturas} setFacturas={setFacturas} empresa={empresa} />}
+        {tab === "contabilidad" && <Contabilidad facturas={facturas} setFacturas={setFacturas} empresa={empresa} clientes={clientes} proveedores={proveedores} />}
         {tab === "documentos" && <Documentos clientes={clientes} proveedores={proveedores} obras={obras} docs={documentosList} setDocs={setDocumentos} />}
         {tab === "agente" && <Agente setFacturas={setFacturas} facturas={facturas} clientes={clientes} obras={obras} proveedores={proveedores} />}
         {tab === "ajustes" && <Ajustes empresa={empresa} setEmpresa={emp => { setEmpresa(emp); try { localStorage.setItem("fc_empresa", JSON.stringify(emp)); } catch {} }} />}
@@ -2122,6 +2406,29 @@ export default function FactuCloudApp() {
 function Ajustes({ empresa, setEmpresa }) {
   const [form, setForm] = useState({ ...empresa });
   const [guardado, setGuardado] = useState(false);
+  const [logoPreview, setLogoPreview] = useState(() => {
+    try { return localStorage.getItem("fc_logo") || null; } catch { return null; }
+  });
+
+  const handleLogoUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 500000) { alert("El logo no debe superar 500KB"); return; }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const base64 = ev.target.result;
+      setLogoPreview(base64);
+      try { localStorage.setItem("fc_logo", base64); } catch {}
+      setForm(p => ({ ...p, logo: base64 }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const eliminarLogo = () => {
+    setLogoPreview(null);
+    try { localStorage.removeItem("fc_logo"); } catch {}
+    setForm(p => ({ ...p, logo: null }));
+  };
   const inp = { width: "100%", background: "#ffffff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" };
   const lbl = { fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono', monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 };
 
@@ -2151,6 +2458,35 @@ function Ajustes({ empresa, setEmpresa }) {
         <div>
           <div style={{ fontSize: 14, color: "#334155", marginBottom: 6 }}>Logo de FactuCloud</div>
           <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.8 }}>Este logo aparecerá en tus facturas, presupuestos e informes. Puedes personalizarlo con el nombre de tu empresa en los datos de abajo.</div>
+        </div>
+      </div>
+
+      {/* Logo empresa */}
+      <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderTop: "2px solid #f0a500", borderRadius: 3, padding: "24px", marginBottom: 16 }}>
+        <div style={{ fontSize: 10, color: "#f0a500", letterSpacing: 4, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 20 }}>Logo de la empresa</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
+          {/* Preview del logo */}
+          <div style={{ width: 120, height: 80, border: "2px dashed #e2e8f0", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", background: "#f8fafc", overflow: "hidden", flexShrink: 0 }}>
+            {logoPreview
+              ? <img src={logoPreview} alt="Logo" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
+              : <div style={{ textAlign: "center", color: "#94a3b8", fontSize: 10, fontFamily: "'JetBrains Mono',monospace" }}>Sin logo</div>
+            }
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 12, lineHeight: 1.7 }}>
+              Sube el logo de tu empresa. Aparecerá en todas tus <strong>facturas, presupuestos y nóminas</strong>.<br/>
+              <span style={{ fontSize: 11, color: "#94a3b8" }}>Formatos: PNG, JPG, SVG — Máximo 500KB</span>
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <label style={{ background: "#f0a500", color: "#1e293b", border: "none", padding: "10px 20px", cursor: "pointer", fontSize: 11, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 4, textTransform: "uppercase", display: "inline-block" }}>
+                ↑ Subir logo
+                <input type="file" accept="image/*" onChange={handleLogoUpload} style={{ display: "none" }} />
+              </label>
+              {logoPreview && (
+                <button onClick={eliminarLogo} style={{ background: "#e0525215", border: "1px solid #e0525233", color: "#e05252", padding: "10px 16px", cursor: "pointer", fontSize: 11, fontFamily: "'JetBrains Mono',monospace", borderRadius: 4, textTransform: "uppercase" }}>✕ Eliminar</button>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -2238,7 +2574,7 @@ function Nominas({ empleados: empleadosProp, setEmpleados: setEmpleadosProp }) {
   const [form, setForm] = useState({
     nombre: "", dni: "", categoria: "", convenio: "Construcción y Obras Públicas", contrato: "Indefinido",
     salarioBruto: "", fechaAlta: "", proyecto: "", iban: "",
-    hijos: 0, discapacidad: false, residente: true
+    hijos: 0, discapacidad: false, residente: true, irpfManual: ""
   });
 
   const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -2261,7 +2597,10 @@ function Nominas({ empleados: empleadosProp, setEmpleados: setEmpleadosProp }) {
 
   const calcularNomina = (emp) => {
     const bruto = parseFloat(emp.salarioBruto) || 0;
-    const tipoIRPF = calcularIRPF(bruto * 12, parseInt(emp.hijos || 0), emp.discapacidad);
+    const tipoIRPFAuto = calcularIRPF(bruto * 12, parseInt(emp.hijos || 0), emp.discapacidad);
+    const tipoIRPF = emp.irpfManual !== "" && emp.irpfManual !== undefined && emp.irpfManual !== null
+      ? parseFloat(emp.irpfManual) / 100
+      : tipoIRPFAuto;
     const irpf = bruto * tipoIRPF;
     const ssTrabajador = bruto * 0.0635;
     const ssEmpresa = bruto * 0.2360;
@@ -2281,6 +2620,8 @@ function Nominas({ empleados: empleadosProp, setEmpleados: setEmpleadosProp }) {
   const exportarNominaPDF = (emp) => {
     const n = calcularNomina(emp);
     const mes = MESES[mesNomina];
+    const logoGuardadoN = (() => { try { return localStorage.getItem("fc_logo"); } catch { return null; } })();
+    const empresaGuardadaN = (() => { try { return JSON.parse(localStorage.getItem("fc_empresa") || "{}"); } catch { return {}; } })();
     const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Nomina ${emp.nombre}</title>
     <style>body{font-family:Arial,sans-serif;max-width:780px;margin:20px auto;padding:30px;color:#1e293b;font-size:13px}
     .header{background:#f8f9fa;color:#f0a500;padding:20px;display:flex;justify-content:space-between;margin-bottom:20px}
@@ -2294,7 +2635,7 @@ function Nominas({ empleados: empleadosProp, setEmpleados: setEmpleadosProp }) {
     .total-val{font-size:28px;color:#f0a500;font-weight:bold}
     .footer{margin-top:30px;padding-top:16px;border-top:1px solid #eee;font-size:10px;color:#aaa;display:flex;justify-content:space-between}
     </style></head><body>
-    <div class="header"><div><h2>FACTUCLOUD</h2><p style="margin:4px 0;font-size:11px;color:#888">Nomina del trabajador</p></div>
+    <div class="header"><div style="display:flex;align-items:center;gap:16px">${logoGuardadoN ? `<img src="${logoGuardadoN}" style="height:44px;object-fit:contain"/>` : ""}<div><h2>${empresaGuardadaN.nombre||"FACTUCLOUD"}</h2><p style="margin:4px 0;font-size:11px;color:#888">${empresaGuardadaN.cif||""} · Nómina del trabajador</p></div></div>
     <div style="text-align:right"><p style="color:#f0a500;font-size:14px;margin:0">${mes} ${new Date().getFullYear()}</p></div></div>
     <div class="emp">
       <div><div style="color:#888;font-size:10px">TRABAJADOR</div><strong>${emp.nombre}</strong></div>
@@ -2403,6 +2744,13 @@ function Nominas({ empleados: empleadosProp, setEmpleados: setEmpleadosProp }) {
                   <div><div style={labelStyle}>Numero de hijos</div>
                     <input type="number" min="0" value={form.hijos} onChange={e => setForm(p => ({ ...p, hijos: parseInt(e.target.value) || 0 }))} style={inputStyle} />
                   </div>
+                  <div>
+                    <div style={labelStyle}>IRPF manual (%) — opcional</div>
+                    <input type="number" min="0" max="45" step="0.5" value={form.irpfManual} onChange={e => setForm(p => ({ ...p, irpfManual: e.target.value }))} style={inputStyle} placeholder="Dejar vacío para cálculo automático" />
+                    <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace", marginTop: 4 }}>
+                      {form.irpfManual !== "" ? `⚠ IRPF fijo: ${form.irpfManual}% (sobreescribe el cálculo automático)` : "Auto: calculado por tramos según situación personal"}
+                    </div>
+                  </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, paddingTop: 22 }}>
                     <input type="checkbox" checked={form.discapacidad} onChange={e => setForm(p => ({ ...p, discapacidad: e.target.checked }))} style={{ width: 16, height: 16, accentColor: "#f0a500" }} />
                     <span style={{ fontSize: 12, color: "#64748b", fontFamily: "'JetBrains Mono', monospace" }}>Discapacidad reconocida</span>
@@ -2437,6 +2785,18 @@ function Nominas({ empleados: empleadosProp, setEmpleados: setEmpleadosProp }) {
                         </div>
                         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                           <button onClick={() => exportarNominaPDF(e)} style={{ background: "#4caf7d15", border: "1px solid #4caf7d33", color: "#4caf7d", padding: "6px 14px", cursor: "pointer", fontSize: 9, letterSpacing: 2, fontFamily: "'JetBrains Mono', monospace", borderRadius: 2, textTransform: "uppercase" }}>Nomina PDF</button>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span style={{ fontSize: 10, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace" }}>IRPF%:</span>
+                            <input
+                              type="number" min="0" max="45" step="0.5"
+                              value={e.irpfManual !== undefined && e.irpfManual !== "" ? e.irpfManual : (calcularNomina(e).tipoIRPF * 100).toFixed(1)}
+                              onChange={ev => setEmpleados(prev => prev.map(x => x.id === e.id ? { ...x, irpfManual: ev.target.value } : x))}
+                              style={{ width: 60, background: "#ffffff", border: "1px solid #f0a50044", color: "#f0a500", padding: "4px 8px", fontSize: 12, fontFamily: "'JetBrains Mono',monospace", borderRadius: 4, outline: "none", textAlign: "center" }}
+                            />
+                            {(e.irpfManual !== "" && e.irpfManual !== undefined) && (
+                              <button onClick={() => setEmpleados(prev => prev.map(x => x.id === e.id ? { ...x, irpfManual: "" } : x))} style={{ background: "none", border: "none", color: "#94a3b8", cursor: "pointer", fontSize: 10, fontFamily: "'JetBrains Mono',monospace" }} title="Volver a automático">↺ auto</button>
+                            )}
+                          </div>
                           <div style={{ textAlign: "right" }}>
                             <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'JetBrains Mono', monospace", marginBottom: 4 }}>Coste empresa</div>
                             <div style={{ fontSize: 20, color: "#e05252" }}>{formatEURLocal(n.costeEmpresa)}</div>
@@ -2444,7 +2804,7 @@ function Nominas({ empleados: empleadosProp, setEmpleados: setEmpleadosProp }) {
                         </div>
                       </div>
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 12, marginTop: 16, paddingTop: 16, borderTop: "1px solid #e2e8f0" }}>
-                        {[["Bruto", formatEURLocal(n.bruto), "#aaa"], ["IRPF "+((n.tipoIRPF*100).toFixed(1))+"%", formatEURLocal(n.irpf), "#e05252"], ["SS trabajador", formatEURLocal(n.ssTrabajador), "#7eb8f5"], ["SS empresa", formatEURLocal(n.ssEmpresa), "#a78bfa"], ["Neto a pagar", formatEURLocal(n.neto), "#4caf7d"]].map(([k, v, c]) => (
+                        {[["Bruto", formatEURLocal(n.bruto), "#aaa"], ["IRPF "+((n.tipoIRPF*100).toFixed(1))+"%" + (e.irpfManual !== "" && e.irpfManual !== undefined ? " ✎" : " auto"), formatEURLocal(n.irpf), "#e05252"], ["SS trabajador", formatEURLocal(n.ssTrabajador), "#7eb8f5"], ["SS empresa", formatEURLocal(n.ssEmpresa), "#a78bfa"], ["Neto a pagar", formatEURLocal(n.neto), "#4caf7d"]].map(([k, v, c]) => (
                           <div key={k}>
                             <div style={{ fontSize: 9, color: "#94a3b8", letterSpacing: 2, fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase", marginBottom: 4 }}>{k}</div>
                             <div style={{ fontSize: 14, color: c }}>{v}</div>
@@ -2945,6 +3305,74 @@ function Tesoreria({ facturas, movimientos: movimientosProp, setMovimientos: set
   const setMovimientos = movimientosProp !== undefined ? setMovimientosProp : setMovimientosLocal;
   const [nuevo, setNuevo] = useState(false);
   const [subtab, setSubtab] = useState("resumen");
+  const [bancoConectado, setBancoConectado] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("fc_banco_conectado") || "null"); } catch { return null; }
+  });
+  const [sincronizando, setSincronizando] = useState(false);
+  const [bancoBuscador, setBancoBuscador] = useState("");
+  const [mostrarBancos, setMostrarBancos] = useState(false);
+  const [ultimaSync, setUltimaSync] = useState(() => {
+    try { return localStorage.getItem("fc_ultima_sync") || null; } catch { return null; }
+  });
+
+  const BANCOS_ES = [
+    { id: "BBVA_ES", nombre: "BBVA", logo: "🏦" },
+    { id: "SANTANDER_ES", nombre: "Santander", logo: "🏦" },
+    { id: "CAIXABANK_ES", nombre: "CaixaBank", logo: "🏦" },
+    { id: "SABADELL_ES", nombre: "Banco Sabadell", logo: "🏦" },
+    { id: "BANKINTER_ES", nombre: "Bankinter", logo: "🏦" },
+    { id: "ING_ES", nombre: "ING España", logo: "🏦" },
+    { id: "UNICAJA_ES", nombre: "Unicaja", logo: "🏦" },
+    { id: "ABANCA_ES", nombre: "Abanca", logo: "🏦" },
+    { id: "KUTXABANK_ES", nombre: "Kutxabank", logo: "🏦" },
+    { id: "CAJAMAR_ES", nombre: "Cajamar", logo: "🏦" },
+    { id: "IBERCAJA_ES", nombre: "Ibercaja", logo: "🏦" },
+    { id: "CAJASUR_ES", nombre: "CajaSur", logo: "🏦" },
+    { id: "EVO_ES", nombre: "EVO Banco", logo: "🏦" },
+    { id: "OPENBANK_ES", nombre: "Openbank", logo: "🏦" },
+    { id: "REVOLUT_ES", nombre: "Revolut", logo: "🏦" },
+  ];
+
+  const bancosFiltrados = BANCOS_ES.filter(b =>
+    b.nombre.toLowerCase().includes(bancoBuscador.toLowerCase())
+  );
+
+  const conectarBanco = (banco) => {
+    // UI demo - cuando se integre GoCardless aquí irá la redirección OAuth al banco
+    setBancoConectado(banco);
+    setMostrarBancos(false);
+    setBancoBuscador("");
+    try { localStorage.setItem("fc_banco_conectado", JSON.stringify(banco)); } catch {}
+    // Simular importación de movimientos demo
+    simularSincronizacion(banco);
+  };
+
+  const simularSincronizacion = (banco) => {
+    setSincronizando(true);
+    setTimeout(() => {
+      const movimientosDemo = [
+        { id: Date.now()+1, concepto: "Transferencia recibida - PROMOTORA GARCIA SL", importe: 28500, tipo: "cobro", fecha: new Date().toLocaleDateString("es-ES"), vencimiento: "", estado: "Importado", categoria: "Clientes", registrado: new Date().toLocaleDateString("es-ES"), origen: "banco" },
+        { id: Date.now()+2, concepto: "Pago proveedor - MATERIALES CONSTRUCCION SL", importe: 4200, tipo: "pago", fecha: new Date().toLocaleDateString("es-ES"), vencimiento: "", estado: "Importado", categoria: "Proveedores", registrado: new Date().toLocaleDateString("es-ES"), origen: "banco" },
+        { id: Date.now()+3, concepto: "Nominas empleados mayo 2026", importe: 8400, tipo: "pago", fecha: new Date().toLocaleDateString("es-ES"), vencimiento: "", estado: "Importado", categoria: "Nóminas", registrado: new Date().toLocaleDateString("es-ES"), origen: "banco" },
+        { id: Date.now()+4, concepto: "Cobro factura F2026-012 - CONSTRUCTORA NORTE", importe: 15600, tipo: "cobro", fecha: new Date().toLocaleDateString("es-ES"), vencimiento: "", estado: "Importado", categoria: "Clientes", registrado: new Date().toLocaleDateString("es-ES"), origen: "banco" },
+        { id: Date.now()+5, concepto: "Cuota Seguridad Social mayo", importe: 1890, tipo: "pago", fecha: new Date().toLocaleDateString("es-ES"), vencimiento: "", estado: "Importado", categoria: "Impuestos", registrado: new Date().toLocaleDateString("es-ES"), origen: "banco" },
+      ];
+      setMovimientos(prev => {
+        const nuevos = movimientosDemo.filter(m => !prev.find(p => p.concepto === m.concepto));
+        return [...prev, ...nuevos];
+      });
+      const ahora = new Date().toLocaleString("es-ES");
+      setUltimaSync(ahora);
+      try { localStorage.setItem("fc_ultima_sync", ahora); } catch {}
+      setSincronizando(false);
+    }, 2500);
+  };
+
+  const desconectarBanco = () => {
+    setBancoConectado(null);
+    try { localStorage.removeItem("fc_banco_conectado"); localStorage.removeItem("fc_ultima_sync"); } catch {}
+    setUltimaSync(null);
+  };
   const [form, setForm] = useState({ concepto: "", importe: "", tipo: "cobro", fecha: "", vencimiento: "", estado: "Pendiente", categoria: "Clientes" });
   const [csvImportado, setCsvImportado] = useState([]);
   const [saldoMinimo, setSaldoMinimo] = useState(10000);
@@ -3145,7 +3573,7 @@ function Tesoreria({ facturas, movimientos: movimientosProp, setMovimientos: set
 
       {/* Subtabs */}
       <div style={{ display: "flex", gap: 0, borderBottom: "1px solid #e2e8f0", marginBottom: 20 }}>
-        {[["resumen", "Resumen"], ["aging", "Aging cobros"], ["cobros", `↑ Cobros (${cobros.length})`], ["pagos", `↓ Pagos (${pagos.length})`], ["previsiones", "Previsión 90 días"], ["config", "⚙ Config"]].map(([id, label]) => (
+        {[["resumen", "Resumen"], ["aging", "Aging cobros"], ["cobros", `↑ Cobros (${cobros.length})`], ["pagos", `↓ Pagos (${pagos.length})`], ["previsiones", "Previsión 90 días"], ["banco", bancoConectado ? `🏦 ${bancoConectado.nombre}` : "🏦 Conectar banco"], ["config", "⚙ Config"]].map(([id, label]) => (
           <button key={id} onClick={() => setSubtab(id)} style={{ background: "none", border: "none", color: subtab === id ? "#f0a500" : "#555", padding: "12px 18px", cursor: "pointer", fontSize: 10, letterSpacing: 2, textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace", borderBottom: subtab === id ? "2px solid #f0a500" : "2px solid transparent", whiteSpace: "nowrap" }}>{label}</button>
         ))}
       </div>
@@ -3252,6 +3680,137 @@ function Tesoreria({ facturas, movimientos: movimientosProp, setMovimientos: set
               </div>
             );
           })}
+        </div>
+      )}
+
+      {subtab === "banco" && (
+        <div>
+          {/* Banner estado banco */}
+          {bancoConectado ? (
+            <div style={{ background: "#4caf7d10", border: "1px solid #4caf7d33", borderRadius: 8, padding: "20px 24px", marginBottom: 24, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                <div style={{ width: 48, height: 48, borderRadius: "50%", background: "#4caf7d22", border: "2px solid #4caf7d", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>🏦</div>
+                <div>
+                  <div style={{ fontSize: 16, color: "#1e293b", fontWeight: 600, marginBottom: 4 }}>{bancoConectado.nombre} conectado</div>
+                  <div style={{ fontSize: 11, color: "#64748b", fontFamily: "'JetBrains Mono',monospace" }}>
+                    Solo lectura · PSD2 · {ultimaSync ? `Última sync: ${ultimaSync}` : "Sin sincronizar aún"}
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button onClick={() => simularSincronizacion(bancoConectado)} disabled={sincronizando} style={{ background: "#4caf7d", color: "#fff", border: "none", padding: "10px 20px", cursor: sincronizando ? "not-allowed" : "pointer", fontSize: 10, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 6, textTransform: "uppercase" }}>
+                  {sincronizando ? "⟳ Sincronizando..." : "⟳ Sincronizar ahora"}
+                </button>
+                <button onClick={desconectarBanco} style={{ background: "#e0525215", border: "1px solid #e0525233", color: "#e05252", padding: "10px 16px", cursor: "pointer", fontSize: 10, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", borderRadius: 6, textTransform: "uppercase" }}>Desconectar</button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ background: "#f8fafc", border: "2px dashed #e2e8f0", borderRadius: 12, padding: "40px", textAlign: "center", marginBottom: 24 }}>
+              <div style={{ fontSize: 48, marginBottom: 16 }}>🏦</div>
+              <div style={{ fontSize: 18, color: "#1e293b", fontWeight: 600, marginBottom: 8 }}>Conecta tu banco</div>
+              <div style={{ fontSize: 13, color: "#64748b", marginBottom: 24, lineHeight: 1.8, maxWidth: 480, margin: "0 auto 24px" }}>
+                Sincroniza tus movimientos bancarios automáticamente. Conexión de <strong>solo lectura</strong> — nunca puede mover dinero. Compatible con todos los bancos españoles vía <strong>Open Banking PSD2</strong>.
+              </div>
+              <button onClick={() => setMostrarBancos(true)} style={{ background: "#f0a500", color: "#1e293b", border: "none", padding: "14px 36px", cursor: "pointer", fontSize: 13, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 8, textTransform: "uppercase" }}>
+                🏦 Conectar mi banco
+              </button>
+              <div style={{ marginTop: 16, fontSize: 11, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace" }}>
+                Gratis · Solo lectura · Regulado PSD2 · Datos cifrados
+              </div>
+            </div>
+          )}
+
+          {/* Modal selector de banco */}
+          {mostrarBancos && (
+            <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <div style={{ background: "#fff", borderRadius: 16, padding: "32px", width: 480, maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+                  <div style={{ fontSize: 18, color: "#1e293b", fontWeight: 600 }}>Selecciona tu banco</div>
+                  <button onClick={() => { setMostrarBancos(false); setBancoBuscador(""); }} style={{ background: "none", border: "none", color: "#94a3b8", cursor: "pointer", fontSize: 22 }}>×</button>
+                </div>
+                <input
+                  value={bancoBuscador}
+                  onChange={e => setBancoBuscador(e.target.value)}
+                  placeholder="Buscar banco..."
+                  style={{ width: "100%", background: "#f8fafc", border: "1px solid #e2e8f0", color: "#334155", padding: "12px 16px", fontSize: 14, fontFamily: "'JetBrains Mono',monospace", borderRadius: 8, outline: "none", boxSizing: "border-box", marginBottom: 16 }}
+                />
+                <div style={{ overflowY: "auto", flex: 1 }}>
+                  {bancosFiltrados.map(banco => (
+                    <button key={banco.id} onClick={() => conectarBanco(banco)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, cursor: "pointer", marginBottom: 8, textAlign: "left", transition: "all .15s" }}
+                      onMouseEnter={e => e.currentTarget.style.borderColor = "#f0a500"}
+                      onMouseLeave={e => e.currentTarget.style.borderColor = "#e2e8f0"}>
+                      <div style={{ width: 40, height: 40, borderRadius: "50%", background: "#f0a50015", border: "1px solid #f0a50033", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>🏦</div>
+                      <div>
+                        <div style={{ fontSize: 14, color: "#1e293b", fontWeight: 500 }}>{banco.nombre}</div>
+                        <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace" }}>Open Banking · Solo lectura</div>
+                      </div>
+                      <div style={{ marginLeft: "auto", fontSize: 18, color: "#f0a500" }}>→</div>
+                    </button>
+                  ))}
+                </div>
+                <div style={{ marginTop: 16, padding: "12px 16px", background: "#f0a50010", borderRadius: 8, fontSize: 11, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", lineHeight: 1.7 }}>
+                  🔒 Serás redirigido a tu banco para autenticarte. FactuCloud nunca ve tus credenciales bancarias.
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Movimientos importados del banco */}
+          {bancoConectado && (
+            <div>
+              <div style={{ fontSize: 10, letterSpacing: 4, color: "#f0a500", textTransform: "uppercase", fontFamily: "'JetBrains Mono',monospace", marginBottom: 16 }}>
+                Movimientos importados del banco
+              </div>
+              {sincronizando ? (
+                <div style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
+                  <div style={{ fontSize: 32, marginBottom: 12 }}>⟳</div>
+                  <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 12 }}>Sincronizando con {bancoConectado.nombre}...</div>
+                </div>
+              ) : movimientos.filter(m => m.origen === "banco").length === 0 ? (
+                <div style={{ textAlign: "center", padding: "40px", color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace", fontSize: 12 }}>
+                  Sin movimientos importados aún — pulsa "Sincronizar ahora"
+                </div>
+              ) : (
+                <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, overflow: "hidden" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 140px 100px 120px", borderBottom: "1px solid #e2e8f0", background: "#f8fafc" }}>
+                    {["Concepto","Importe","Tipo","Fecha"].map(h => (
+                      <div key={h} style={{ padding: "10px 16px", fontSize: 9, color: "#94a3b8", letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase" }}>{h}</div>
+                    ))}
+                  </div>
+                  {movimientos.filter(m => m.origen === "banco").map((m, i) => (
+                    <div key={m.id} style={{ display: "grid", gridTemplateColumns: "1fr 140px 100px 120px", borderBottom: i < movimientos.filter(x=>x.origen==="banco").length-1 ? "1px solid #f1f5f9" : "none", alignItems: "center" }}>
+                      <div style={{ padding: "14px 16px" }}>
+                        <div style={{ fontSize: 13, color: "#334155", marginBottom: 2 }}>{m.concepto}</div>
+                        <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace" }}>{m.categoria} · 🏦 {bancoConectado.nombre}</div>
+                      </div>
+                      <div style={{ padding: "14px 16px", fontSize: 15, color: m.tipo === "cobro" ? "#4caf7d" : "#e05252", fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold" }}>
+                        {m.tipo === "cobro" ? "+" : "-"}{parseFloat(m.importe).toLocaleString("es-ES")} €
+                      </div>
+                      <div style={{ padding: "14px 16px" }}>
+                        <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 20, background: m.tipo === "cobro" ? "#4caf7d22" : "#e0525222", color: m.tipo === "cobro" ? "#4caf7d" : "#e05252", fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", letterSpacing: 1 }}>{m.tipo}</span>
+                      </div>
+                      <div style={{ padding: "14px 16px", fontSize: 12, color: "#64748b", fontFamily: "'JetBrains Mono',monospace" }}>{m.fecha}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Info seguridad */}
+          <div style={{ marginTop: 24, display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+            {[
+              ["🔒", "Solo lectura", "Nunca puede mover dinero ni ejecutar transferencias"],
+              ["🏛", "Regulado PSD2", "Autorizado por el Banco de España bajo directiva europea"],
+              ["🔄", "Auto-sync", "Se sincroniza automáticamente cada 12 horas"],
+            ].map(([icon, titulo, desc]) => (
+              <div key={titulo} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "16px" }}>
+                <div style={{ fontSize: 24, marginBottom: 8 }}>{icon}</div>
+                <div style={{ fontSize: 12, color: "#1e293b", fontWeight: 600, marginBottom: 4 }}>{titulo}</div>
+                <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.6 }}>{desc}</div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -4236,9 +4795,9 @@ function PanelAdmin({ authToken, onLogout }) {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
               <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 3, padding: "24px" }}>
                 <div style={{ fontSize: 10, color: "#f0a500", letterSpacing: 4, textTransform: "uppercase", marginBottom: 16 }}>Distribución por plan</div>
-                {[["Básico (29€/mes)", clientes.filter(c=>c.plan==="basico").length, "#7eb8f5"],
-                  ["Pro (79€/mes)", clientes.filter(c=>c.plan==="pro").length, "#a78bfa"],
-                  ["Enterprise (199€/mes)", clientes.filter(c=>c.plan==="enterprise").length, "#f0a500"]
+                {[[`Básico (${config.precio_basico||29}€/mes)`, clientes.filter(c=>c.plan==="basico").length, "#7eb8f5"],
+                  [`Pro (${config.precio_pro||79}€/mes)`, clientes.filter(c=>c.plan==="pro").length, "#a78bfa"],
+                  [`Enterprise (${config.precio_enterprise||199}€/mes)`, clientes.filter(c=>c.plan==="enterprise").length, "#f0a500"]
                 ].map(([l,v,c]) => (
                   <div key={l} style={{ marginBottom: 14 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
