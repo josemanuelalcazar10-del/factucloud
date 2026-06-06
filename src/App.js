@@ -4037,10 +4037,41 @@ function PanelAdmin({ authToken, onLogout }) {
   const [formCliente, setFormCliente] = useState({ email: "", password: "", empresa: "", plan: "basico" });
   const [creando, setCreando] = useState(false);
   const [errorCrear, setErrorCrear] = useState("");
+  const [config, setConfig] = useState({ precio_basico: "29", precio_pro: "79", precio_enterprise: "199", nombre_app: "FactuCloud", moneda: "EUR" });
+  const [configGuardada, setConfigGuardada] = useState(false);
 
   useEffect(() => {
     cargarClientes();
+    cargarConfig();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const cargarConfig = async () => {
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/configuracion`, {
+        headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${authToken}` }
+      });
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        const cfg = {};
+        data.forEach(row => { cfg[row.id] = row.valor; });
+        setConfig(prev => ({ ...prev, ...cfg }));
+      }
+    } catch(e) { console.error("Error cargando config:", e); }
+  };
+
+  const guardarConfig = async () => {
+    try {
+      for (const [id, valor] of Object.entries(config)) {
+        await fetch(`${SUPABASE_URL}/rest/v1/configuracion?id=eq.${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", "apikey": SUPABASE_KEY, "Authorization": `Bearer ${authToken}`, "Prefer": "return=minimal" },
+          body: JSON.stringify({ valor })
+        });
+      }
+      setConfigGuardada(true);
+      setTimeout(() => setConfigGuardada(false), 2500);
+    } catch(e) { console.error("Error guardando config:", e); }
+  };
 
   const cargarClientes = async () => {
     setLoading(true);
@@ -4115,7 +4146,7 @@ function PanelAdmin({ authToken, onLogout }) {
 
         {/* Tabs */}
         <div style={{ display: "flex", gap: 0, borderBottom: "1px solid #e2e8f0", marginBottom: 24 }}>
-          {[["clientes","Clientes"],["stats","Estadísticas"],["accesos","Accesos y planes"]].map(([id, label]) => (
+          {[["clientes","Clientes"],["stats","Estadísticas"],["accesos","Accesos y planes"],["config","⚙ Configuración"]].map(([id, label]) => (
             <button key={id} onClick={() => setTab(id)} style={{ background: "none", border: "none", color: tab === id ? "#f0a500" : "#555", padding: "12px 20px", cursor: "pointer", fontSize: 10, letterSpacing: 3, textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace", borderBottom: tab === id ? "2px solid #f0a500" : "2px solid transparent" }}>{label}</button>
           ))}
           <button onClick={() => setNuevoCliente(true)} style={{ marginLeft: "auto", background: "#f0a500", color: "#f8f9fa", border: "none", padding: "10px 24px", cursor: "pointer", fontSize: 10, letterSpacing: 3, textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace", fontWeight: "bold", borderRadius: 2 }}>+ Nuevo cliente</button>
@@ -4239,7 +4270,87 @@ function PanelAdmin({ authToken, onLogout }) {
             </div>
           </div>
         )}
-        {tab === "accesos" && (
+        {tab === "config" && (
+          <div style={{ maxWidth: 600 }}>
+            <div style={{ fontSize: 10, color: "#f0a500", letterSpacing: 4, textTransform: "uppercase", fontFamily: "'JetBrains Mono',monospace", marginBottom: 24 }}>Configuración de la plataforma</div>
+
+            {/* Precios por plan */}
+            <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderTop: "2px solid #f0a500", borderRadius: 3, padding: "24px", marginBottom: 16 }}>
+              <div style={{ fontSize: 10, color: "#f0a500", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 20 }}>Precios mensuales por plan</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+                {[
+                  ["precio_basico", "Plan Básico", "#7eb8f5"],
+                  ["precio_pro", "Plan Pro", "#a78bfa"],
+                  ["precio_enterprise", "Plan Enterprise", "#f0a500"],
+                ].map(([key, label, color]) => (
+                  <div key={key}>
+                    <div style={{ fontSize: 9, color: "#64748b", letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 8 }}>{label}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <input
+                        type="number"
+                        value={config[key] || ""}
+                        onChange={e => setConfig(p => ({ ...p, [key]: e.target.value }))}
+                        style={{ width: "100%", background: "#ffffff", border: `1px solid ${color}44`, color: color, padding: "12px 14px", fontSize: 20, fontFamily: "'JetBrains Mono',monospace", borderRadius: 4, outline: "none", fontWeight: "bold" }}
+                      />
+                      <span style={{ fontSize: 14, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace" }}>€/mes</span>
+                    </div>
+                    <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace", marginTop: 6 }}>
+                      ARR: {(parseInt(config[key]||0)*12).toLocaleString("es-ES")} €/año por cliente
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Configuración general */}
+            <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderTop: "2px solid #7eb8f5", borderRadius: 3, padding: "24px", marginBottom: 16 }}>
+              <div style={{ fontSize: 10, color: "#7eb8f5", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 20 }}>Configuración general</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                {[
+                  ["nombre_app", "Nombre de la app"],
+                  ["moneda", "Moneda (EUR, USD...)"],
+                ].map(([key, label]) => (
+                  <div key={key}>
+                    <div style={{ fontSize: 9, color: "#64748b", letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 8 }}>{label}</div>
+                    <input
+                      value={config[key] || ""}
+                      onChange={e => setConfig(p => ({ ...p, [key]: e.target.value }))}
+                      style={{ width: "100%", background: "#ffffff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 14, fontFamily: "'JetBrains Mono',monospace", borderRadius: 4, outline: "none", boxSizing: "border-box" }}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Preview MRR con nuevos precios */}
+            <div style={{ background: "#ffffff", border: "1px solid #4caf7d33", borderTop: "2px solid #4caf7d", borderRadius: 3, padding: "20px", marginBottom: 20 }}>
+              <div style={{ fontSize: 10, color: "#4caf7d", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 14 }}>Preview MRR con estos precios</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                {(() => {
+                  const mrr = clientes.filter(c=>c.activo&&c.plan==="basico").length * parseInt(config.precio_basico||29) +
+                              clientes.filter(c=>c.activo&&c.plan==="pro").length * parseInt(config.precio_pro||79) +
+                              clientes.filter(c=>c.activo&&c.plan==="enterprise").length * parseInt(config.precio_enterprise||199);
+                  return [
+                    ["MRR estimado", `${mrr.toLocaleString("es-ES")} €/mes`, "#4caf7d"],
+                    ["ARR estimado", `${(mrr*12).toLocaleString("es-ES")} €/año`, "#f0a500"],
+                  ].map(([l,v,c]) => (
+                    <div key={l} style={{ padding: "12px 16px", background: "#f8fafc", borderRadius: 4 }}>
+                      <div style={{ fontSize: 9, color: "#64748b", letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 6 }}>{l}</div>
+                      <div style={{ fontSize: 22, color: c, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold" }}>{v}</div>
+                    </div>
+                  ));
+                })()}
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <button onClick={guardarConfig} style={{ background: "#f0a500", color: "#1e293b", border: "none", padding: "14px 36px", cursor: "pointer", fontSize: 11, letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 4, textTransform: "uppercase" }}>✓ Guardar configuración</button>
+              {configGuardada && <div style={{ fontSize: 12, color: "#4caf7d", fontFamily: "'JetBrains Mono',monospace" }}>✓ Guardado en Supabase</div>}
+            </div>
+          </div>
+        )}
+
+      {tab === "accesos" && (
           <div>
             <div style={{ fontSize: 10, color: "#f0a500", letterSpacing: 4, textTransform: "uppercase", marginBottom: 20 }}>Gestión de accesos y planes</div>
             {clientes.length === 0
