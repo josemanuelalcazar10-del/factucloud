@@ -4222,10 +4222,10 @@ function PanelAdmin({ authToken, onLogout }) {
             {/* KPIs SaaS */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 24 }}>
               {[
-                ["MRR estimado", `${(clientes.filter(c=>c.activo&&c.plan==="basico").length*29 + clientes.filter(c=>c.activo&&c.plan==="pro").length*79 + clientes.filter(c=>c.activo&&c.plan==="enterprise").length*199).toFixed(0)} €/mes`, "#4caf7d"],
-                ["ARR estimado", `${((clientes.filter(c=>c.activo&&c.plan==="basico").length*29 + clientes.filter(c=>c.activo&&c.plan==="pro").length*79 + clientes.filter(c=>c.activo&&c.plan==="enterprise").length*199)*12).toFixed(0)} €/año`, "#f0a500"],
+                ["MRR estimado", `${(clientes.filter(c=>c.activo&&c.plan==="basico").length*parseInt(config.precio_basico||29) + clientes.filter(c=>c.activo&&c.plan==="pro").length*parseInt(config.precio_pro||79) + clientes.filter(c=>c.activo&&c.plan==="enterprise").length*parseInt(config.precio_enterprise||199)).toFixed(0)} €/mes`, "#4caf7d"],
+                ["ARR estimado", `${((clientes.filter(c=>c.activo&&c.plan==="basico").length*parseInt(config.precio_basico||29) + clientes.filter(c=>c.activo&&c.plan==="pro").length*parseInt(config.precio_pro||79) + clientes.filter(c=>c.activo&&c.plan==="enterprise").length*parseInt(config.precio_enterprise||199))*12).toFixed(0)} €/año`, "#f0a500"],
                 ["Churn", clientes.filter(c=>!c.activo).length > 0 ? `${((clientes.filter(c=>!c.activo).length/clientes.length)*100).toFixed(0)}%` : "0%", "#e05252"],
-                ["LTV medio", clientes.length > 0 ? `${((clientes.filter(c=>c.activo&&c.plan==="basico").length*29 + clientes.filter(c=>c.activo&&c.plan==="pro").length*79)*12/Math.max(clientes.length,1)).toFixed(0)} €` : "0 €", "#7eb8f5"],
+                ["LTV medio", clientes.length > 0 ? `${((clientes.filter(c=>c.activo&&c.plan==="basico").length*parseInt(config.precio_basico||29) + clientes.filter(c=>c.activo&&c.plan==="pro").length*parseInt(config.precio_pro||79))*12/Math.max(clientes.length,1)).toFixed(0)} €` : "0 €", "#7eb8f5"],
               ].map(([l,v,c]) => (
                 <div key={l} style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderTop: `2px solid ${c}`, padding: "18px 22px", borderRadius: 3 }}>
                   <div style={{ fontSize: 9, color: "#64748b", letterSpacing: 3, textTransform: "uppercase", marginBottom: 8 }}>{l}</div>
