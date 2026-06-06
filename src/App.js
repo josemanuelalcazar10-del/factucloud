@@ -104,7 +104,7 @@ const Card = ({ children, accent, onClick, selected }) => (
 function Dashboard({ obras, facturas, proveedores, clientes, setTab }) {
   const ingresos = facturas.filter(f => f.tipo === "ingreso").reduce((s, f) => s + f.total, 0);
   const gastos = facturas.filter(f => f.tipo === "gasto").reduce((s, f) => s + f.total, 0);
-  const pendCobro = facturas.filter(f => f.tipo === "ingreso" && f.estado === "Pendiente").reduce((s, f) => s + f.total, 0);
+  const pendCobro = facturas.filter(f => f.tipo === "ingreso" && ["Pendiente","Emitida"].includes(f.estado)).reduce((s, f) => s + f.total, 0);
   const margen = ingresos - gastos;
   const margenPct = ingresos > 0 ? ((margen / ingresos) * 100).toFixed(1) : 0;
 
@@ -242,83 +242,486 @@ function Dashboard({ obras, facturas, proveedores, clientes, setTab }) {
 // ════════════════════════════════════════
 // OBRAS
 // ════════════════════════════════════════
-function Obras({ obras, setObras }) {
+function Obras({ obras, setObras, clientes: clientesProp, facturas }) {
   const [sel, setSel] = useState(null);
+  const [subtab, setSubtab] = useState("lista");
   const [nuevo, setNuevo] = useState(false);
-  const [form, setForm] = useState({ nombre: "", cliente: "", direccion: "", inicio: "", fin: "", presupuesto: "", estado: "Pendiente inicio" });
+  const [editando, setEditando] = useState(false);
+  const [form, setForm] = useState({
+    nombre: "", codigo: "", tipo: "Edificacion", cliente: "", responsable: "",
+    direccion: "", municipio: "", provincia: "", inicio: "", fin: "",
+    presupuesto: "", margenObj: 20, estado: "Pendiente inicio",
+    descripcion: "", arquitecto: ""
+  });
+  const [formEdit, setFormEdit] = useState({});
+  const [nuevaCert, setNuevaCert] = useState(false);
+  const [formCert, setFormCert] = useState({ numero: "", descripcion: "", importe: "", fecha: new Date().toLocaleDateString("es-ES"), estado: "Pendiente" });
+  const [nuevaFase, setNuevaFase] = useState(false);
+  const [formFase, setFormFase] = useState({ nombre: "", inicio: "", fin: "", progreso: 0, responsable: "" });
+  const [nuevaIncidencia, setNuevaIncidencia] = useState(false);
+  const [formInc, setFormInc] = useState({ descripcion: "", tipo: "Aviso", estado: "Abierta", fecha: new Date().toLocaleDateString("es-ES") });
+
   const obra = obras.find(o => o.id === sel);
+  const TIPOS = ["Edificación","Reforma","Obra civil","Nave industrial","Urbanización","Rehabilitación","Instalaciones","Otro"];
+  const ESTADOS = ["Pendiente inicio","En ejecución","Parada","Finalizada","Facturada"];
+  const inp = { width: "100%", background: "#ffffff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" };
+  const lbl = { fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 };
 
   const guardar = () => {
     if (!form.nombre) return;
-    setObras(prev => [...prev, { ...form, id: Date.now(), progreso: 0, certificado: 0, incidencias: 0, color: "#f0a500", presupuesto: parseFloat(form.presupuesto) || 0 }]);
-    setNuevo(false); setForm({ nombre: "", cliente: "", direccion: "", inicio: "", fin: "", presupuesto: "", estado: "Pendiente inicio" });
+    setObras(prev => [...prev, {
+      ...form, id: Date.now(), progreso: 0, certificado: 0, incidencias: 0,
+      color: "#f0a500", presupuesto: parseFloat(form.presupuesto) || 0,
+      certificaciones: [], fases: [], incidenciasList: [], costes: []
+    }]);
+    setNuevo(false);
+    setForm({ nombre: "", codigo: "", tipo: "Edificacion", cliente: "", responsable: "", direccion: "", municipio: "", provincia: "", inicio: "", fin: "", presupuesto: "", margenObj: 20, estado: "Pendiente inicio", descripcion: "", arquitecto: "" });
+  };
+
+  const guardarEdicion = () => {
+    setObras(prev => prev.map(o => o.id === sel ? { ...o, ...formEdit, presupuesto: parseFloat(formEdit.presupuesto)||o.presupuesto } : o));
+    setEditando(false);
+  };
+
+  const guardarCertificacion = () => {
+    if (!formCert.importe || !obra) return;
+    const cert = { ...formCert, id: Date.now(), importe: parseFloat(formCert.importe) };
+    const totalCert = [...(obra.certificaciones||[]), cert].reduce((s,c) => s+c.importe, 0);
+    const progreso = Math.min(100, Math.round((totalCert / (obra.presupuesto||1)) * 100));
+    setObras(prev => prev.map(o => o.id === sel ? {
+      ...o, certificaciones: [...(o.certificaciones||[]), cert],
+      certificado: totalCert, progreso
+    } : o));
+    setNuevaCert(false);
+    setFormCert({ numero: "", descripcion: "", importe: "", fecha: new Date().toLocaleDateString("es-ES"), estado: "Pendiente" });
+  };
+
+  const guardarFase = () => {
+    if (!formFase.nombre || !obra) return;
+    setObras(prev => prev.map(o => o.id === sel ? { ...o, fases: [...(o.fases||[]), { ...formFase, id: Date.now() }] } : o));
+    setNuevaFase(false);
+    setFormFase({ nombre: "", inicio: "", fin: "", progreso: 0, responsable: "" });
+  };
+
+  const guardarIncidencia = () => {
+    if (!formInc.descripcion || !obra) return;
+    setObras(prev => prev.map(o => o.id === sel ? {
+      ...o,
+      incidenciasList: [...(o.incidenciasList||[]), { ...formInc, id: Date.now() }],
+      incidencias: (o.incidencias||0) + 1
+    } : o));
+    setNuevaIncidencia(false);
+    setFormInc({ descripcion: "", tipo: "Aviso", estado: "Abierta", fecha: new Date().toLocaleDateString("es-ES") });
+  };
+
+  // KPIs económicos de la obra
+  const calcularKPIs = (o) => {
+    const presupuesto = o.presupuesto || 0;
+    const certificado = o.certificado || 0;
+    const facturasObra = (facturas||[]).filter(f => f.concepto?.includes(o.nombre) || f.obra === o.nombre);
+    const facturado = facturasObra.filter(f => f.tipo === "ingreso").reduce((s,f) => s+(f.total||0), 0);
+    const gastado = facturasObra.filter(f => f.tipo === "gasto").reduce((s,f) => s+(f.total||0), 0);
+    const margenReal = facturado > 0 ? ((facturado - gastado) / facturado * 100).toFixed(1) : 0;
+    const desviacion = presupuesto > 0 ? (((gastado - presupuesto) / presupuesto) * 100).toFixed(1) : 0;
+    const pendienteFact = certificado - facturado;
+    return { presupuesto, certificado, facturado, gastado, margenReal, desviacion, pendienteFact };
   };
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 28 }}>
-        <div style={{ fontSize: 11, letterSpacing: 6, color: "#f0a500", textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace" }}>— {obras.length} proyectos registrados</div>
-        <button onClick={() => setNuevo(true)} style={{ background: "#f0a500", color: "#f8f9fa", border: "none", padding: "10px 24px", cursor: "pointer", fontSize: 11, letterSpacing: 3, textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace", fontWeight: "bold", borderRadius: 2 }}>+ Nuevo proyecto</button>
+      {/* HEADER */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+        <div style={{ fontSize: 11, letterSpacing: 6, color: "#f0a500", textTransform: "uppercase", fontFamily: "'JetBrains Mono',monospace" }}>— {obras.length} proyectos</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          {sel && <button onClick={() => { setSel(null); setSubtab("lista"); }} style={{ background: "none", border: "1px solid #e2e8f0", color: "#64748b", padding: "10px 18px", cursor: "pointer", fontSize: 10, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>← Volver</button>}
+          <button onClick={() => { setNuevo(true); setSel(null); }} style={{ background: "#f0a500", color: "#f8f9fa", border: "none", padding: "10px 24px", cursor: "pointer", fontSize: 11, letterSpacing: 3, textTransform: "uppercase", fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 2 }}>+ Nuevo proyecto</button>
+        </div>
       </div>
 
+      {/* FORMULARIO NUEVO */}
       {nuevo && (
         <div style={{ background: "#f0f4ff", border: "1px solid #f0a50033", borderRadius: 3, padding: "24px 28px", marginBottom: 20 }}>
-          <div style={{ fontSize: 10, letterSpacing: 4, color: "#f0a500", fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase", marginBottom: 18 }}>Nuevo proyecto</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            {[["nombre", "Nombre del proyecto"], ["cliente", "Cliente"], ["direccion", "Dirección"], ["presupuesto", "Presupuesto (€)"], ["inicio", "Fecha inicio"], ["fin", "Fecha fin prevista"]].map(([k, label]) => (
-              <div key={k}>
-                <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "'JetBrains Mono', monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>{label}</div>
-                <input value={form[k]} onChange={e => setForm(p => ({ ...p, [k]: e.target.value }))} style={{ width: "100%", background: "#ffffff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }} />
-              </div>
-            ))}
+          <div style={{ fontSize: 10, letterSpacing: 4, color: "#f0a500", fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 18 }}>Nuevo proyecto</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
+            <div><div style={lbl}>Nombre del proyecto</div><input value={form.nombre} onChange={e => setForm(p=>({...p,nombre:e.target.value}))} style={inp} /></div>
+            <div><div style={lbl}>Código / Referencia</div><input value={form.codigo} onChange={e => setForm(p=>({...p,codigo:e.target.value}))} placeholder="OBR-2026-001" style={inp} /></div>
+            <div><div style={lbl}>Tipo de obra</div>
+              <select value={form.tipo} onChange={e => setForm(p=>({...p,tipo:e.target.value}))} style={inp}>
+                {TIPOS.map(t => <option key={t}>{t}</option>)}
+              </select>
+            </div>
+            <div><div style={lbl}>Cliente</div>
+              <select value={form.cliente} onChange={e => setForm(p=>({...p,cliente:e.target.value}))} style={inp}>
+                <option value="">— Seleccionar cliente —</option>
+                {(clientesProp||[]).map(c => <option key={c.id} value={c.nombre}>{c.nombre}</option>)}
+                <option value="__manual__">+ Escribir manualmente</option>
+              </select>
+              {form.cliente === "__manual__" && <input onChange={e => setForm(p=>({...p,cliente:e.target.value}))} placeholder="Nombre del cliente" style={{...inp, marginTop: 6}} />}
+            </div>
+            <div><div style={lbl}>Responsable de obra</div><input value={form.responsable} onChange={e => setForm(p=>({...p,responsable:e.target.value}))} style={inp} /></div>
+            <div><div style={lbl}>Arquitecto / Aparejador</div><input value={form.arquitecto} onChange={e => setForm(p=>({...p,arquitecto:e.target.value}))} style={inp} /></div>
+            <div><div style={lbl}>Dirección</div><input value={form.direccion} onChange={e => setForm(p=>({...p,direccion:e.target.value}))} style={inp} /></div>
+            <div><div style={lbl}>Municipio</div><input value={form.municipio} onChange={e => setForm(p=>({...p,municipio:e.target.value}))} style={inp} /></div>
+            <div><div style={lbl}>Provincia</div><input value={form.provincia} onChange={e => setForm(p=>({...p,provincia:e.target.value}))} style={inp} /></div>
+            <div><div style={lbl}>Presupuesto (€)</div><input type="number" value={form.presupuesto} onChange={e => setForm(p=>({...p,presupuesto:e.target.value}))} style={inp} /></div>
+            <div><div style={lbl}>Margen objetivo (%)</div><input type="number" value={form.margenObj} onChange={e => setForm(p=>({...p,margenObj:parseInt(e.target.value)||0}))} style={inp} /></div>
+            <div><div style={lbl}>Estado</div>
+              <select value={form.estado} onChange={e => setForm(p=>({...p,estado:e.target.value}))} style={inp}>
+                {ESTADOS.map(s => <option key={s}>{s}</option>)}
+              </select>
+            </div>
+            <div><div style={lbl}>Fecha inicio</div><input value={form.inicio} onChange={e => setForm(p=>({...p,inicio:e.target.value}))} style={inp} /></div>
+            <div><div style={lbl}>Fecha fin prevista</div><input value={form.fin} onChange={e => setForm(p=>({...p,fin:e.target.value}))} style={inp} /></div>
+            <div style={{ gridColumn: "1/-1" }}><div style={lbl}>Descripción del proyecto</div><textarea value={form.descripcion} onChange={e => setForm(p=>({...p,descripcion:e.target.value}))} style={{...inp, minHeight: 60, resize: "vertical"}} /></div>
           </div>
           <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
-            <button onClick={guardar} style={{ background: "#f0a500", color: "#f8f9fa", border: "none", padding: "12px 28px", cursor: "pointer", fontSize: 11, letterSpacing: 3, fontFamily: "'JetBrains Mono', monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase" }}>✓ Guardar</button>
-            <button onClick={() => setNuevo(false)} style={{ background: "none", border: "1px solid #e2e8f0", color: "#94a3b8", padding: "12px 20px", cursor: "pointer", fontSize: 11, letterSpacing: 2, fontFamily: "'JetBrains Mono', monospace", borderRadius: 2, textTransform: "uppercase" }}>Cancelar</button>
+            <button onClick={guardar} style={{ background: "#f0a500", color: "#f8f9fa", border: "none", padding: "12px 28px", cursor: "pointer", fontSize: 11, letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase" }}>✓ Guardar proyecto</button>
+            <button onClick={() => setNuevo(false)} style={{ background: "none", border: "1px solid #e2e8f0", color: "#94a3b8", padding: "12px 20px", cursor: "pointer", fontSize: 11, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>Cancelar</button>
           </div>
         </div>
       )}
 
-      {obras.length === 0 && !nuevo
-        ? <div style={{ textAlign: "center", padding: "60px 0", color: "#94a3b8", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 3 }}>Sin proyectos — pulsa "+ Nuevo proyecto" para añadir</div>
-        : <div style={{ display: "grid", gridTemplateColumns: sel ? "1fr 360px" : "repeat(2,1fr)", gap: 14 }}>
-            <div style={{ display: "grid", gridTemplateColumns: sel ? "1fr" : "repeat(2,1fr)", gap: 12 }}>
-              {obras.map(o => (
-                <Card key={o.id} onClick={() => setSel(sel === o.id ? null : o.id)} selected={sel === o.id}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 14 }}>
-                    <div>
-                      <div style={{ fontSize: 15, color: "#1e293b", marginBottom: 4 }}>{o.nombre}</div>
-                      <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'JetBrains Mono', monospace" }}>{o.cliente}</div>
+      {/* LISTA DE PROYECTOS */}
+      {!sel && !nuevo && (
+        <div>
+          {obras.length === 0
+            ? <div style={{ textAlign: "center", padding: "60px 0", color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace", fontSize: 13, letterSpacing: 3 }}>Sin proyectos — pulsa "+ Nuevo proyecto"</div>
+            : <div style={{ display: "grid", gap: 12 }}>
+                {obras.map(o => {
+                  const kpi = calcularKPIs(o);
+                  return (
+                    <div key={o.id} onClick={() => setSel(o.id)} style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderLeft: `4px solid ${ESTADO_COL[o.estado]||"#555"}`, borderRadius: 3, padding: "20px 24px", cursor: "pointer", transition: "all .2s" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+                        <div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                            <div style={{ fontSize: 16, color: "#1e293b", fontWeight: 600 }}>{o.nombre}</div>
+                            {o.codigo && <span style={{ fontSize: 10, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace", background: "#f1f5f9", padding: "2px 8px", borderRadius: 20 }}>{o.codigo}</span>}
+                          </div>
+                          <div style={{ fontSize: 12, color: "#64748b", fontFamily: "'JetBrains Mono',monospace" }}>{o.cliente} · {o.tipo} · {o.municipio||o.direccion}</div>
+                        </div>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                          <Badge label={o.estado} />
+                        </div>
+                      </div>
+                      <Bar v={o.progreso} color={ESTADO_COL[o.estado]||"#f0a500"} />
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 12, marginTop: 14 }}>
+                        {[
+                          ["Presupuesto", formatEUR(kpi.presupuesto), "#64748b"],
+                          ["Certificado", formatEUR(kpi.certificado), "#7eb8f5"],
+                          ["Facturado", formatEUR(kpi.facturado), "#4caf7d"],
+                          ["Coste real", formatEUR(kpi.gastado), "#e05252"],
+                          ["Margen", `${kpi.margenReal}%`, parseFloat(kpi.margenReal) >= (o.margenObj||15) ? "#4caf7d" : "#e05252"],
+                        ].map(([k,v,c]) => (
+                          <div key={k}>
+                            <div style={{ fontSize: 9, color: "#94a3b8", letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 4 }}>{k}</div>
+                            <div style={{ fontSize: 14, color: c, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold" }}>{v}</div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    <Badge label={o.estado} />
+                  );
+                })}
+              </div>
+          }
+        </div>
+      )}
+
+      {/* DETALLE PROYECTO */}
+      {sel && obra && (
+        <div>
+          {/* Tabs detalle */}
+          <div style={{ display: "flex", gap: 0, borderBottom: "1px solid #e2e8f0", marginBottom: 20 }}>
+            {[["resumen","Resumen"],["economico","Control económico"],["certificaciones","Certificaciones"],["fases","Planning / Fases"],["incidencias","Incidencias"]].map(([id,label]) => (
+              <button key={id} onClick={() => setSubtab(id)} style={{ background: "none", border: "none", color: subtab===id?"#f0a500":"#555", padding: "12px 18px", cursor: "pointer", fontSize: 10, letterSpacing: 2, textTransform: "uppercase", fontFamily: "'JetBrains Mono',monospace", borderBottom: subtab===id?"2px solid #f0a500":"2px solid transparent", whiteSpace: "nowrap" }}>{label}</button>
+            ))}
+          </div>
+
+          {/* TAB RESUMEN */}
+          {subtab === "resumen" && (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                    <div style={{ fontSize: 24, color: "#1e293b", fontWeight: 300 }}>{obra.nombre}</div>
+                    {obra.codigo && <span style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace", background: "#f1f5f9", padding: "3px 10px", borderRadius: 20 }}>{obra.codigo}</span>}
+                    <Badge label={obra.estado} />
                   </div>
-                  <Bar v={o.progreso} color={o.color} />
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginTop: 14 }}>
-                    {[["Presupuesto", formatEUR(o.presupuesto)], ["Certificado", formatEUR(o.certificado)], ["Avance", `${o.progreso}%`]].map(([k, v]) => (
-                      <div key={k}><div style={{ fontSize: 9, color: "#94a3b8", letterSpacing: 3, fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase", marginBottom: 4 }}>{k}</div><div style={{ fontSize: 13, color: "#64748b" }}>{v}</div></div>
+                  <div style={{ fontSize: 12, color: "#64748b", fontFamily: "'JetBrains Mono',monospace" }}>{obra.tipo} · {obra.direccion} {obra.municipio} {obra.provincia}</div>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => { setFormEdit({...obra}); setEditando(true); setSubtab("resumen"); }} style={{ background: "#f0a50015", border: "1px solid #f0a50033", color: "#f0a500", padding: "8px 16px", cursor: "pointer", fontSize: 10, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>✎ Editar</button>
+                  <button onClick={() => { setObras(prev => prev.filter(o => o.id !== sel)); setSel(null); }} style={{ background: "#e0525215", border: "1px solid #e0525233", color: "#e05252", padding: "8px 16px", cursor: "pointer", fontSize: 10, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>✕ Eliminar</button>
+                </div>
+              </div>
+
+              {editando && (
+                <div style={{ background: "#f0f4ff", border: "1px solid #f0a50033", borderRadius: 3, padding: "20px 24px", marginBottom: 20 }}>
+                  <div style={{ fontSize: 10, color: "#f0a500", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 16 }}>Editar proyecto</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                    {[["nombre","Nombre"],["codigo","Código"],["cliente","Cliente"],["responsable","Responsable"],["arquitecto","Arquitecto"],["direccion","Dirección"],["municipio","Municipio"],["provincia","Provincia"],["presupuesto","Presupuesto (€)"],["inicio","Inicio"],["fin","Fin previsto"]].map(([k,label]) => (
+                      <div key={k}>
+                        <div style={lbl}>{label}</div>
+                        <input value={formEdit[k]||""} onChange={e => setFormEdit(p=>({...p,[k]:e.target.value}))} style={inp} />
+                      </div>
                     ))}
+                    <div><div style={lbl}>Estado</div>
+                      <select value={formEdit.estado||""} onChange={e => setFormEdit(p=>({...p,estado:e.target.value}))} style={inp}>
+                        {ESTADOS.map(s => <option key={s}>{s}</option>)}
+                      </select>
+                    </div>
+                    <div><div style={lbl}>Margen objetivo (%)</div>
+                      <input type="number" value={formEdit.margenObj||20} onChange={e => setFormEdit(p=>({...p,margenObj:parseInt(e.target.value)||0}))} style={inp} />
+                    </div>
                   </div>
-                </Card>
-              ))}
-            </div>
-            {obra && (
-              <div style={{ background: "#f0f4ff", border: "1px solid #f0a50033", borderRadius: 3, padding: "28px" }}>
-                <div style={{ fontSize: 10, letterSpacing: 4, color: "#f0a500", textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace", marginBottom: 6 }}>Detalle</div>
-                <h3 style={{ margin: "0 0 4px", fontWeight: 300, fontSize: 20, color: "#1e293b" }}>{obra.nombre}</h3>
-                <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'JetBrains Mono', monospace", marginBottom: 24 }}>{obra.direccion}</div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
-                  {[["Cliente", obra.cliente], ["Estado", obra.estado], ["Inicio", obra.inicio], ["Fin previsto", obra.fin], ["Certificado", formatEUR(obra.certificado)], ["Incidencias", obra.incidencias]].map(([k, v]) => (
-                    <div key={k} style={{ borderBottom: "1px solid #e2e8f0", paddingBottom: 10 }}>
-                      <div style={{ fontSize: 9, color: "#94a3b8", letterSpacing: 3, fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase", marginBottom: 4 }}>{k}</div>
-                      <div style={{ fontSize: 13, color: "#334155" }}>{v}</div>
+                  <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+                    <button onClick={guardarEdicion} style={{ background: "#f0a500", color: "#f8f9fa", border: "none", padding: "10px 24px", cursor: "pointer", fontSize: 10, letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase" }}>✓ Guardar</button>
+                    <button onClick={() => setEditando(false)} style={{ background: "none", border: "1px solid #e2e8f0", color: "#94a3b8", padding: "10px 16px", cursor: "pointer", fontSize: 10, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>Cancelar</button>
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 3, padding: "20px" }}>
+                  <div style={{ fontSize: 10, color: "#f0a500", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 14 }}>Datos generales</div>
+                  {[["Cliente",obra.cliente],["Tipo",obra.tipo],["Responsable",obra.responsable||"—"],["Arquitecto",obra.arquitecto||"—"],["Inicio",obra.inicio||"—"],["Fin previsto",obra.fin||"—"],["Descripción",obra.descripcion||"—"]].map(([k,v]) => (
+                    <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f1f5f9" }}>
+                      <span style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", letterSpacing: 1 }}>{k}</span>
+                      <span style={{ fontSize: 12, color: "#334155", maxWidth: "60%", textAlign: "right" }}>{v}</span>
                     </div>
                   ))}
                 </div>
-                <button onClick={() => setSel(null)} style={{ background: "none", border: "1px solid #e2e8f0", color: "#94a3b8", padding: "10px 20px", fontSize: 10, letterSpacing: 3, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer", borderRadius: 2, textTransform: "uppercase" }}>← Volver</button>
+                <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 3, padding: "20px" }}>
+                  <div style={{ fontSize: 10, color: "#f0a500", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 14 }}>Progreso de certificación</div>
+                  <div style={{ fontSize: 36, color: "#f0a500", fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", marginBottom: 8 }}>{obra.progreso||0}%</div>
+                  <Bar v={obra.progreso||0} color="#f0a500" />
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 16 }}>
+                    {[["Certificaciones",`${(obra.certificaciones||[]).length} emitidas`,"#7eb8f5"],["Fases",`${(obra.fases||[]).length} definidas`,"#a78bfa"],["Incidencias",`${obra.incidencias||0} registradas`,"#e05252"]].map(([k,v,c]) => (
+                      <div key={k} style={{ background: "#f8fafc", borderRadius: 4, padding: "10px 12px" }}>
+                        <div style={{ fontSize: 9, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", letterSpacing: 2, marginBottom: 4 }}>{k}</div>
+                        <div style={{ fontSize: 14, color: c, fontFamily: "'JetBrains Mono',monospace" }}>{v}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
-            )}
-          </div>
-      }
+            </div>
+          )}
+
+          {/* TAB CONTROL ECONÓMICO */}
+          {subtab === "economico" && (() => {
+            const kpi = calcularKPIs(obra);
+            return (
+              <div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, marginBottom: 20 }}>
+                  {[
+                    ["Presupuesto contrato", formatEUR(kpi.presupuesto), "#64748b", "Base de referencia"],
+                    ["Total certificado", formatEUR(kpi.certificado), "#7eb8f5", `${obra.progreso||0}% del presupuesto`],
+                    ["Total facturado", formatEUR(kpi.facturado), "#4caf7d", "Facturas emitidas al cliente"],
+                    ["Coste real", formatEUR(kpi.gastado), "#e05252", "Gastos registrados"],
+                    ["Margen real", `${kpi.margenReal}%`, parseFloat(kpi.margenReal)>=(obra.margenObj||15)?"#4caf7d":"#e05252", `Objetivo: ${obra.margenObj||20}%`],
+                    ["Pdte. facturar", formatEUR(kpi.pendienteFact), "#f0a500", "Certificado no facturado"],
+                  ].map(([l,v,c,s]) => (
+                    <div key={l} style={{ background: "#fff", border: "1px solid #e2e8f0", borderTop: `2px solid ${c}`, borderRadius: 3, padding: "18px 20px" }}>
+                      <div style={{ fontSize: 9, color: "#94a3b8", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 8 }}>{l}</div>
+                      <div style={{ fontSize: 22, color: c, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", marginBottom: 4 }}>{v}</div>
+                      <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace" }}>{s}</div>
+                    </div>
+                  ))}
+                </div>
+                {/* Barra de desviación */}
+                <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 3, padding: "20px", marginBottom: 14 }}>
+                  <div style={{ fontSize: 10, color: "#f0a500", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 14 }}>Desviación sobre presupuesto</div>
+                  <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                        <span style={{ fontSize: 11, color: "#64748b", fontFamily: "'JetBrains Mono',monospace" }}>Coste real vs Presupuesto</span>
+                        <span style={{ fontSize: 13, color: parseFloat(kpi.desviacion) > 0 ? "#e05252" : "#4caf7d", fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold" }}>
+                          {parseFloat(kpi.desviacion) > 0 ? "+" : ""}{kpi.desviacion}%
+                        </span>
+                      </div>
+                      <div style={{ height: 12, background: "#e2e8f0", borderRadius: 6, overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${Math.min(100, kpi.presupuesto > 0 ? (kpi.gastado/kpi.presupuesto)*100 : 0)}%`, background: parseFloat(kpi.desviacion) > 10 ? "#e05252" : parseFloat(kpi.desviacion) > 0 ? "#f0a500" : "#4caf7d", borderRadius: 6 }} />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                {/* Facturas vinculadas */}
+                <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 3, padding: "20px" }}>
+                  <div style={{ fontSize: 10, color: "#7eb8f5", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 14 }}>Facturas vinculadas a esta obra</div>
+                  {(facturas||[]).filter(f => f.concepto?.includes(obra.nombre) || f.obra === obra.nombre).length === 0
+                    ? <div style={{ color: "#94a3b8", fontSize: 12, fontFamily: "'JetBrains Mono',monospace", textAlign: "center", padding: "20px 0" }}>Sin facturas vinculadas — las facturas se vinculan automáticamente cuando el concepto coincide con el nombre del proyecto</div>
+                    : (facturas||[]).filter(f => f.concepto?.includes(obra.nombre) || f.obra === obra.nombre).map(f => (
+                      <div key={f.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #f1f5f9" }}>
+                        <div>
+                          <div style={{ fontSize: 13, color: "#334155" }}>{f.numero||f.numeroFactura}</div>
+                          <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace" }}>{f.fecha} · {f.tipo === "ingreso" ? "Ingreso" : "Gasto"}</div>
+                        </div>
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontSize: 15, color: f.tipo === "ingreso" ? "#4caf7d" : "#e05252", fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold" }}>{f.tipo==="ingreso"?"+":"-"}{formatEUR(f.total)}</div>
+                          <Badge label={f.estado} />
+                        </div>
+                      </div>
+                    ))
+                  }
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* TAB CERTIFICACIONES */}
+          {subtab === "certificaciones" && (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+                <div style={{ fontSize: 10, color: "#f0a500", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase" }}>Certificaciones de obra</div>
+                <button onClick={() => setNuevaCert(true)} style={{ background: "#f0a500", color: "#f8f9fa", border: "none", padding: "10px 20px", cursor: "pointer", fontSize: 10, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase" }}>+ Nueva certificación</button>
+              </div>
+              {nuevaCert && (
+                <div style={{ background: "#f0f4ff", border: "1px solid #f0a50033", borderRadius: 3, padding: "20px", marginBottom: 16 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                    {[["numero","Nº certificación","Cert. 1"],["descripcion","Descripción","Trabajos ejecutados..."],["importe","Importe (€)","0"],["fecha","Fecha",""]].map(([k,label,ph]) => (
+                      <div key={k}>
+                        <div style={lbl}>{label}</div>
+                        <input value={formCert[k]} onChange={e => setFormCert(p=>({...p,[k]:e.target.value}))} placeholder={ph} style={inp} />
+                      </div>
+                    ))}
+                    <div><div style={lbl}>Estado</div>
+                      <select value={formCert.estado} onChange={e => setFormCert(p=>({...p,estado:e.target.value}))} style={inp}>
+                        {["Pendiente","Aprobada","Facturada","Cobrada"].map(s => <option key={s}>{s}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+                    <button onClick={guardarCertificacion} style={{ background: "#f0a500", color: "#f8f9fa", border: "none", padding: "10px 24px", cursor: "pointer", fontSize: 10, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase" }}>✓ Guardar</button>
+                    <button onClick={() => setNuevaCert(false)} style={{ background: "none", border: "1px solid #e2e8f0", color: "#94a3b8", padding: "10px 16px", cursor: "pointer", fontSize: 10, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>Cancelar</button>
+                  </div>
+                </div>
+              )}
+              {(obra.certificaciones||[]).length === 0 && !nuevaCert
+                ? <div style={{ textAlign: "center", padding: "40px", color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace", fontSize: 12 }}>Sin certificaciones — añade la primera certificación</div>
+                : (obra.certificaciones||[]).map((c,i) => (
+                  <div key={c.id} style={{ background: "#fff", border: "1px solid #e2e8f0", borderLeft: `3px solid ${ESTADO_COL[c.estado]||"#555"}`, borderRadius: 2, padding: "16px 20px", marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <div style={{ fontSize: 14, color: "#334155", marginBottom: 4 }}>{c.numero||`Certificación ${i+1}`}</div>
+                      <div style={{ fontSize: 12, color: "#64748b", fontFamily: "'JetBrains Mono',monospace" }}>{c.descripcion} · {c.fecha}</div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 20, color: "#7eb8f5", fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", marginBottom: 4 }}>{formatEUR(c.importe)}</div>
+                      <Badge label={c.estado} />
+                    </div>
+                  </div>
+                ))
+              }
+              {(obra.certificaciones||[]).length > 0 && (
+                <div style={{ background: "#1e293b", borderRadius: 4, padding: "14px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
+                  <span style={{ fontSize: 11, color: "#f0a500", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2 }}>TOTAL CERTIFICADO</span>
+                  <span style={{ fontSize: 22, color: "#f0a500", fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold" }}>{formatEUR(obra.certificado||0)}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB FASES / PLANNING */}
+          {subtab === "fases" && (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+                <div style={{ fontSize: 10, color: "#f0a500", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase" }}>Planning de fases</div>
+                <button onClick={() => setNuevaFase(true)} style={{ background: "#f0a500", color: "#f8f9fa", border: "none", padding: "10px 20px", cursor: "pointer", fontSize: 10, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase" }}>+ Nueva fase</button>
+              </div>
+              {nuevaFase && (
+                <div style={{ background: "#f0f4ff", border: "1px solid #f0a50033", borderRadius: 3, padding: "20px", marginBottom: 16 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                    {[["nombre","Nombre de la fase"],["inicio","Fecha inicio"],["fin","Fecha fin"],["responsable","Responsable"]].map(([k,label]) => (
+                      <div key={k}><div style={lbl}>{label}</div><input value={formFase[k]} onChange={e => setFormFase(p=>({...p,[k]:e.target.value}))} style={inp} /></div>
+                    ))}
+                    <div>
+                      <div style={lbl}>Progreso (%)</div>
+                      <input type="number" min="0" max="100" value={formFase.progreso} onChange={e => setFormFase(p=>({...p,progreso:parseInt(e.target.value)||0}))} style={inp} />
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+                    <button onClick={guardarFase} style={{ background: "#f0a500", color: "#f8f9fa", border: "none", padding: "10px 24px", cursor: "pointer", fontSize: 10, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase" }}>✓ Guardar</button>
+                    <button onClick={() => setNuevaFase(false)} style={{ background: "none", border: "1px solid #e2e8f0", color: "#94a3b8", padding: "10px 16px", cursor: "pointer", fontSize: 10, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>Cancelar</button>
+                  </div>
+                </div>
+              )}
+              {(obra.fases||[]).length === 0 && !nuevaFase
+                ? <div style={{ textAlign: "center", padding: "40px", color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace", fontSize: 12 }}>Sin fases definidas — añade el planning de la obra</div>
+                : (obra.fases||[]).map((f,i) => {
+                  const cols = ["#7eb8f5","#f0a500","#4caf7d","#a78bfa","#e05252"];
+                  const c = cols[i%cols.length];
+                  return (
+                    <div key={f.id} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 3, padding: "16px 20px", marginBottom: 10 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                        <div>
+                          <div style={{ fontSize: 14, color: "#334155", marginBottom: 3 }}>{f.nombre}</div>
+                          <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace" }}>{f.inicio} → {f.fin} {f.responsable ? `· ${f.responsable}` : ""}</div>
+                        </div>
+                        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                          <div style={{ fontSize: 22, color: c, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold" }}>{f.progreso}%</div>
+                          <input type="range" min="0" max="100" value={f.progreso} onChange={e => setObras(prev => prev.map(o => o.id === sel ? {...o, fases: o.fases.map(fa => fa.id===f.id ? {...fa, progreso: parseInt(e.target.value)} : fa)} : o))} style={{ width: 80, accentColor: c }} />
+                        </div>
+                      </div>
+                      <Bar v={f.progreso} color={c} />
+                    </div>
+                  );
+                })
+              }
+            </div>
+          )}
+
+          {/* TAB INCIDENCIAS */}
+          {subtab === "incidencias" && (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+                <div style={{ fontSize: 10, color: "#f0a500", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase" }}>Registro de incidencias</div>
+                <button onClick={() => setNuevaIncidencia(true)} style={{ background: "#e05252", color: "#f8f9fa", border: "none", padding: "10px 20px", cursor: "pointer", fontSize: 10, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase" }}>+ Nueva incidencia</button>
+              </div>
+              {nuevaIncidencia && (
+                <div style={{ background: "#fff0f0", border: "1px solid #e0525233", borderRadius: 3, padding: "20px", marginBottom: 16 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                    <div style={{ gridColumn: "1/-1" }}><div style={lbl}>Descripción</div><textarea value={formInc.descripcion} onChange={e => setFormInc(p=>({...p,descripcion:e.target.value}))} style={{...inp, minHeight: 60, resize: "vertical"}} /></div>
+                    <div><div style={lbl}>Tipo</div>
+                      <select value={formInc.tipo} onChange={e => setFormInc(p=>({...p,tipo:e.target.value}))} style={inp}>
+                        {["Aviso","Seguridad","Calidad","Retraso","Coste","Otro"].map(t => <option key={t}>{t}</option>)}
+                      </select>
+                    </div>
+                    <div><div style={lbl}>Estado</div>
+                      <select value={formInc.estado} onChange={e => setFormInc(p=>({...p,estado:e.target.value}))} style={inp}>
+                        {["Abierta","En proceso","Resuelta","Cerrada"].map(s => <option key={s}>{s}</option>)}
+                      </select>
+                    </div>
+                    <div><div style={lbl}>Fecha</div><input value={formInc.fecha} onChange={e => setFormInc(p=>({...p,fecha:e.target.value}))} style={inp} /></div>
+                  </div>
+                  <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+                    <button onClick={guardarIncidencia} style={{ background: "#e05252", color: "#fff", border: "none", padding: "10px 24px", cursor: "pointer", fontSize: 10, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase" }}>✓ Registrar</button>
+                    <button onClick={() => setNuevaIncidencia(false)} style={{ background: "none", border: "1px solid #e2e8f0", color: "#94a3b8", padding: "10px 16px", cursor: "pointer", fontSize: 10, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>Cancelar</button>
+                  </div>
+                </div>
+              )}
+              {(obra.incidenciasList||[]).length === 0 && !nuevaIncidencia
+                ? <div style={{ textAlign: "center", padding: "40px", color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace", fontSize: 12 }}>Sin incidencias registradas ✓</div>
+                : (obra.incidenciasList||[]).map(inc => {
+                  const colTipo = {Aviso:"#f0a500",Seguridad:"#e05252",Calidad:"#7eb8f5",Retraso:"#a78bfa",Coste:"#e07830",Otro:"#555"};
+                  const colEst = {Abierta:"#e05252","En proceso":"#f0a500",Resuelta:"#4caf7d",Cerrada:"#555"};
+                  return (
+                    <div key={inc.id} style={{ background: "#fff", border: "1px solid #e2e8f0", borderLeft: `3px solid ${colTipo[inc.tipo]||"#555"}`, borderRadius: 2, padding: "14px 20px", marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                      <div>
+                        <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+                          <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 20, background: `${colTipo[inc.tipo]||"#555"}18`, color: colTipo[inc.tipo]||"#555", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 1, textTransform: "uppercase" }}>{inc.tipo}</span>
+                          <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 20, background: `${colEst[inc.estado]||"#555"}18`, color: colEst[inc.estado]||"#555", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 1, textTransform: "uppercase" }}>{inc.estado}</span>
+                        </div>
+                        <div style={{ fontSize: 13, color: "#334155", marginBottom: 4 }}>{inc.descripcion}</div>
+                        <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace" }}>{inc.fecha}</div>
+                      </div>
+                      <button onClick={() => setObras(prev => prev.map(o => o.id===sel ? {...o, incidenciasList: o.incidenciasList.map(i => i.id===inc.id ? {...i, estado: i.estado==="Abierta"?"En proceso":i.estado==="En proceso"?"Resuelta":"Cerrada"} : i)} : o))} style={{ background: "#f0a50015", border: "1px solid #f0a50033", color: "#f0a500", padding: "6px 12px", cursor: "pointer", fontSize: 9, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase", whiteSpace: "nowrap" }}>Avanzar estado →</button>
+                    </div>
+                  );
+                })
+              }
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -974,6 +1377,10 @@ function Contabilidad({ facturas, setFacturas, empresa: empProp, clientes: clien
   const [deduccion, setDeduccion] = useState(null);
   const [loadingDeduccion, setLoadingDeduccion] = useState(false);
 
+  // Estados previsualización
+  const [previsualizando, setPrevisualizando] = useState(false);
+  const [previsualizandoGasto, setPrevisualizandoGasto] = useState(false);
+
   // Estados factura manual cliente
   const [formFactura, setFormFactura] = useState({
     cliente: "", clienteManual: "", cif: "", direccion: "",
@@ -1245,6 +1652,12 @@ function Contabilidad({ facturas, setFacturas, empresa: empProp, clientes: clien
                       <td style={{ padding: "13px 14px" }}>
                         {bloqueada ? (
                           <div style={{ display: "flex", gap: 4 }}>
+                          {f.estado === "Emitida" && f.tipo === "ingreso" && (
+                            <button onClick={() => setFacturas(prev => prev.map(x => x.id === f.id ? {...x, estado: "Cobrada"} : x))} style={{ background: "#4caf7d15", border: "1px solid #4caf7d33", color: "#4caf7d", padding: "5px 10px", cursor: "pointer", fontSize: 9, letterSpacing: 1, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase", whiteSpace: "nowrap" }}>✓ Cobrada</button>
+                          )}
+                          {f.estado === "Emitida" && f.tipo === "gasto" && (
+                            <button onClick={() => setFacturas(prev => prev.map(x => x.id === f.id ? {...x, estado: "Pagada"} : x))} style={{ background: "#7eb8f515", border: "1px solid #7eb8f533", color: "#7eb8f5", padding: "5px 10px", cursor: "pointer", fontSize: 9, letterSpacing: 1, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase", whiteSpace: "nowrap" }}>✓ Pagada</button>
+                          )}
                           <button onClick={() => {
                             const rect = { id: Date.now(), numero: `R-${f.numero||f.numeroFactura}`, numeroFactura: `R-${f.numero||f.numeroFactura}`, cliente: f.cliente, concepto: `RECTIFICATIVA de ${f.numero||f.numeroFactura}`, base: -(f.base||0), iva: -(f.iva||0), irpf: 0, total: -(f.total||0), fecha: new Date().toLocaleDateString("es-ES"), estado: "Emitida", tipo: f.tipo, auto: false, rectificativa: true };
                             setFacturas(prev => [rect, ...prev]);
@@ -1288,13 +1701,28 @@ function Contabilidad({ facturas, setFacturas, empresa: empProp, clientes: clien
           <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderTop: "2px solid #7eb8f5", borderRadius: 3, padding: "22px", marginBottom: 14 }}>
             <div style={{ fontSize: 10, color: "#7eb8f5", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 16 }}>Datos del cliente</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-              <div>
+              <div style={{ gridColumn: "1/-1" }}>
                 <div style={{ fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>Cliente</div>
-                <input value={formFactura.cliente} onChange={e => setFormFactura(p => ({...p, cliente: e.target.value}))} placeholder="Nombre del cliente o empresa" style={{ width: "100%", background: "#fff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }} />
+                <select value={formFactura.cliente} onChange={e => {
+                  const sel = (clientesProp||[]).find(c => c.nombre === e.target.value);
+                  setFormFactura(p => ({
+                    ...p,
+                    cliente: e.target.value,
+                    cif: sel?.cif || p.cif,
+                    direccion: sel ? `${sel.direccion||""} ${sel.cp||""} ${sel.ciudad||""}`.trim() : p.direccion
+                  }));
+                }} style={{ width: "100%", background: "#fff", border: "1px solid #e2e8f0", color: formFactura.cliente ? "#334155" : "#94a3b8", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }}>
+                  <option value="">— Selecciona un cliente —</option>
+                  {(clientesProp||[]).map(c => <option key={c.id} value={c.nombre}>{c.nombre} {c.cif ? `· ${c.cif}` : ""}</option>)}
+                  <option value="__nuevo__">+ Escribir cliente nuevo</option>
+                </select>
+                {formFactura.cliente === "__nuevo__" && (
+                  <input value={formFactura.clienteManual} onChange={e => setFormFactura(p => ({...p, clienteManual: e.target.value}))} placeholder="Nombre del cliente" style={{ width: "100%", background: "#fff", border: "1px solid #f0a50066", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none", boxSizing: "border-box", marginTop: 8 }} />
+                )}
               </div>
               <div>
                 <div style={{ fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>CIF / NIF</div>
-                <input value={formFactura.cif} onChange={e => setFormFactura(p => ({...p, cif: e.target.value}))} placeholder="B12345678" style={{ width: "100%", background: "#fff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }} />
+                <input value={formFactura.cif} onChange={e => setFormFactura(p => ({...p, cif: e.target.value}))} placeholder="Se rellena automáticamente" style={{ width: "100%", background: "#fff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }} />
               </div>
               <div>
                 <div style={{ fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>Fecha factura</div>
@@ -1399,12 +1827,120 @@ function Contabilidad({ facturas, setFacturas, empresa: empProp, clientes: clien
 
           {/* Botones */}
           <div style={{ display: "flex", gap: 10 }}>
-            <button onClick={() => guardarFacturaManual("Borrador")} style={{ background: "#e2e8f0", color: "#64748b", border: "1px solid #2e2e3e", padding: "12px 24px", cursor: "pointer", fontSize: 11, letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>Guardar borrador</button>
-            <button onClick={() => guardarFacturaManual("Emitida")} style={{ background: "#f0a500", color: "#1e293b", border: "none", padding: "12px 28px", cursor: "pointer", fontSize: 11, letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase" }}>✓ Emitir factura</button>
+            <button onClick={() => setPrevisualizando(true)} disabled={!formFactura.cliente && !formFactura.clienteManual} style={{ background: "#f0a500", color: "#1e293b", border: "none", padding: "12px 28px", cursor: "pointer", fontSize: 11, letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase", opacity: (!formFactura.cliente && !formFactura.clienteManual) ? 0.5 : 1 }}>Vista previa →</button>
             <button onClick={() => setSubtab("lista")} style={{ background: "none", border: "1px solid #e2e8f0", color: "#94a3b8", padding: "12px 20px", cursor: "pointer", fontSize: 11, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>Cancelar</button>
           </div>
         </div>
       )}
+
+      {/* PREVISUALIZACIÓN FACTURA */}
+      {subtab === "nueva" && previsualizando && (() => {
+        const { base, cuotaIVA, cuotaIRPF, total } = calcularTotalesFactura();
+        const emp = empProp || {};
+        const logoGuardado = (() => { try { return localStorage.getItem("fc_logo"); } catch { return null; } })();
+        const clienteNombre = formFactura.cliente === "__nuevo__" ? formFactura.clienteManual : formFactura.cliente;
+        return (
+          <div style={{ maxWidth: 820 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <div>
+                <div style={{ fontSize: 10, color: "#f0a500", letterSpacing: 4, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 4 }}>Vista previa — revisa antes de emitir</div>
+                <div style={{ fontSize: 12, color: "#64748b", fontFamily: "'JetBrains Mono',monospace" }}>Puedes volver atrás para modificar cualquier dato</div>
+              </div>
+              <button onClick={() => setPrevisualizando(false)} style={{ background: "none", border: "1px solid #e2e8f0", color: "#64748b", padding: "8px 16px", cursor: "pointer", fontSize: 10, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>← Volver a editar</button>
+            </div>
+
+            {/* Preview factura estilo documento */}
+            <div style={{ background: "#fff", border: "1px solid #e8e0d0", borderRadius: 4, padding: "40px 44px", marginBottom: 20, boxShadow: "0 2px 12px rgba(0,0,0,0.06)" }}>
+              {/* Cabecera */}
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 28, paddingBottom: 20, borderBottom: "2px solid #1e293b" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                  {logoGuardado && <img src={logoGuardado} style={{ height: 50, objectFit: "contain" }} alt="Logo" />}
+                  <div>
+                    <div style={{ fontSize: 18, fontWeight: 600, color: "#1e293b" }}>{emp.nombre || "Tu empresa"}</div>
+                    <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace", lineHeight: 1.8 }}>
+                      <div>{emp.cif}</div>
+                      <div>{emp.direccion}</div>
+                      <div>{emp.email}</div>
+                    </div>
+                  </div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 28, color: "#f0a500", fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", marginBottom: 6 }}>{siguienteNumero()}</div>
+                  <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace", lineHeight: 1.8 }}>
+                    <div>Fecha: {formFactura.fecha}</div>
+                    {formFactura.fechaVencimiento && <div>Vence: {formFactura.fechaVencimiento}</div>}
+                    <div>Pago: {formFactura.formaPago}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Cliente */}
+              <div style={{ marginBottom: 24, background: "#f8fafc", padding: "14px 18px", borderRadius: 4 }}>
+                <div style={{ fontSize: 10, color: "#94a3b8", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 6 }}>Facturar a</div>
+                <div style={{ fontSize: 16, color: "#1e293b", fontWeight: 600 }}>{clienteNombre}</div>
+                {formFactura.cif && <div style={{ fontSize: 12, color: "#64748b", fontFamily: "'JetBrains Mono',monospace" }}>{formFactura.cif}</div>}
+                {formFactura.direccion && <div style={{ fontSize: 12, color: "#64748b" }}>{formFactura.direccion}</div>}
+              </div>
+
+              {/* Líneas */}
+              <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 24 }}>
+                <thead>
+                  <tr style={{ background: "#1e293b" }}>
+                    {["Descripción","Ud.","Cant.","Precio/Ud.","Importe"].map((h,i) => (
+                      <th key={h} style={{ padding: "10px 12px", fontSize: 9, color: "#f0a500", textTransform: "uppercase", fontFamily: "'JetBrains Mono',monospace", fontWeight: "normal", textAlign: i===0?"left":"right", letterSpacing: 2 }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {formFactura.lineas.filter(l => l.descripcion || l.precioUnitario).map((l,i) => (
+                    <tr key={i} style={{ borderBottom: "1px solid #f0ebe0", background: i%2===0?"#faf8f4":"#fff" }}>
+                      <td style={{ padding: "11px 12px", color: "#1e293b" }}>{l.descripcion}</td>
+                      <td style={{ padding: "11px 12px", textAlign: "right", color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace" }}>{l.unidad}</td>
+                      <td style={{ padding: "11px 12px", textAlign: "right", fontFamily: "'JetBrains Mono',monospace", color: "#64748b" }}>{l.cantidad}</td>
+                      <td style={{ padding: "11px 12px", textAlign: "right", fontFamily: "'JetBrains Mono',monospace", color: "#64748b" }}>{formatEURd(l.precioUnitario)}</td>
+                      <td style={{ padding: "11px 12px", textAlign: "right", fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", color: "#1e293b" }}>{formatEURd((l.cantidad||0)*(l.precioUnitario||0))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {/* Totales */}
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <div style={{ width: 280 }}>
+                  {[
+                    ["Base imponible", formatEURd(base), "#64748b"],
+                    [`IVA (${formFactura.tipoIVA}%)`, formatEURd(cuotaIVA), "#7eb8f5"],
+                    ...(formFactura.tipoIRPF > 0 ? [[`IRPF (${formFactura.tipoIRPF}%)`, `- ${formatEURd(cuotaIRPF)}`, "#e05252"]] : [])
+                  ].map(([k,v,c]) => (
+                    <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f0ebe0" }}>
+                      <span style={{ fontSize: 12, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace" }}>{k}</span>
+                      <span style={{ fontSize: 13, color: c, fontFamily: "'JetBrains Mono',monospace" }}>{v}</span>
+                    </div>
+                  ))}
+                  <div style={{ display: "flex", justifyContent: "space-between", padding: "14px 10px", background: "#1e293b", marginTop: 4, borderRadius: 4 }}>
+                    <span style={{ fontSize: 12, color: "#f0a500", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2 }}>TOTAL</span>
+                    <span style={{ fontSize: 22, color: "#f0a500", fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold" }}>{formatEURd(total)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {formFactura.notas && (
+                <div style={{ marginTop: 20, padding: "12px 16px", background: "#fff8e6", borderLeft: "3px solid #f0a500", borderRadius: 2, fontSize: 12, color: "#64748b" }}>{formFactura.notas}</div>
+              )}
+              {emp.iban && (
+                <div style={{ marginTop: 16, fontSize: 11, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace" }}>Transferencia a: {emp.iban}</div>
+              )}
+            </div>
+
+            {/* Botones de acción */}
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => { guardarFacturaManual("Borrador"); setPrevisualizando(false); }} style={{ background: "#e2e8f0", color: "#64748b", border: "1px solid #2e2e3e", padding: "12px 24px", cursor: "pointer", fontSize: 11, letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>Guardar borrador</button>
+              <button onClick={() => { guardarFacturaManual("Emitida"); setPrevisualizando(false); }} style={{ background: "#f0a500", color: "#1e293b", border: "none", padding: "12px 32px", cursor: "pointer", fontSize: 11, letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase" }}>✓ Emitir factura</button>
+              <button onClick={() => { setPrevisualizando(false); setSubtab("lista"); }} style={{ background: "none", border: "1px solid #e2e8f0", color: "#94a3b8", padding: "12px 20px", cursor: "pointer", fontSize: 11, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>Cancelar</button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* NUEVO GASTO MANUAL */}
       {subtab === "gasto" && (
@@ -1414,9 +1950,28 @@ function Contabilidad({ facturas, setFacturas, empresa: empProp, clientes: clien
           <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderTop: "2px solid #e05252", borderRadius: 3, padding: "22px", marginBottom: 14 }}>
             <div style={{ fontSize: 10, color: "#e05252", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 16 }}>Datos del proveedor</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              {/* Selector proveedor */}
+              <div style={{ gridColumn: "1/-1" }}>
+                <div style={{ fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>Proveedor</div>
+                <select value={formGasto.proveedor} onChange={e => {
+                  const sel = (proveedoresProp||[]).find(p => p.nombre === e.target.value);
+                  setFormGasto(p => ({
+                    ...p,
+                    proveedor: e.target.value,
+                    cif: sel?.cif || p.cif
+                  }));
+                }} style={{ width: "100%", background: "#fff", border: "1px solid #e2e8f0", color: formGasto.proveedor ? "#334155" : "#94a3b8", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }}>
+                  <option value="">— Selecciona un proveedor —</option>
+                  {(proveedoresProp||[]).map(p => <option key={p.id} value={p.nombre}>{p.nombre} {p.cif ? `· ${p.cif}` : ""}</option>)}
+                  <option value="__nuevo__">+ Escribir proveedor nuevo</option>
+                </select>
+                {formGasto.proveedor === "__nuevo__" && (
+                  <input value={formGasto.proveedorManual} onChange={e => setFormGasto(p => ({...p, proveedorManual: e.target.value}))} placeholder="Nombre del proveedor" style={{ width: "100%", background: "#fff", border: "1px solid #f0a50066", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none", boxSizing: "border-box", marginTop: 8 }} />
+                )}
+              </div>
+              {/* Resto de campos */}
               {[
-                ["proveedor", "Proveedor / Empresa", "Nombre del proveedor"],
-                ["cif", "CIF / NIF", "B12345678"],
+                ["cif", "CIF / NIF", "Se rellena automáticamente"],
                 ["concepto", "Concepto del gasto", "Descripción del gasto o trabajo"],
                 ["fecha", "Fecha factura", ""],
                 ["fechaVencimiento", "Fecha vencimiento pago", "dd/mm/aaaa"],
@@ -1469,8 +2024,64 @@ function Contabilidad({ facturas, setFacturas, empresa: empProp, clientes: clien
           </div>
 
           <div style={{ display: "flex", gap: 10 }}>
-            <button onClick={guardarGastoManual} style={{ background: "#e05252", color: "#fff", border: "none", padding: "12px 28px", cursor: "pointer", fontSize: 11, letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase" }}>✓ Registrar gasto</button>
+            <button onClick={() => setPrevisualizandoGasto(true)} disabled={!formGasto.proveedor && !formGasto.proveedorManual} style={{ background: "#e05252", color: "#fff", border: "none", padding: "12px 28px", cursor: "pointer", fontSize: 11, letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase", opacity: (!formGasto.proveedor && !formGasto.proveedorManual) ? 0.5 : 1 }}>Vista previa →</button>
             <button onClick={() => setSubtab("lista")} style={{ background: "none", border: "1px solid #e2e8f0", color: "#94a3b8", padding: "12px 20px", cursor: "pointer", fontSize: 11, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>Cancelar</button>
+          </div>
+        </div>
+      )}
+
+      {/* PREVISUALIZACIÓN GASTO */}
+      {subtab === "gasto" && previsualizandoGasto && (
+        <div style={{ maxWidth: 720 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+            <div>
+              <div style={{ fontSize: 10, color: "#e05252", letterSpacing: 4, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 4 }}>Vista previa — gasto a registrar</div>
+              <div style={{ fontSize: 12, color: "#64748b", fontFamily: "'JetBrains Mono',monospace" }}>Revisa los datos antes de registrar</div>
+            </div>
+            <button onClick={() => setPrevisualizandoGasto(false)} style={{ background: "none", border: "1px solid #e2e8f0", color: "#64748b", padding: "8px 16px", cursor: "pointer", fontSize: 10, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>← Volver a editar</button>
+          </div>
+
+          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 4, padding: "32px", marginBottom: 20, boxShadow: "0 2px 12px rgba(0,0,0,0.06)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 24, paddingBottom: 16, borderBottom: "2px solid #e05252" }}>
+              <div>
+                <div style={{ fontSize: 10, color: "#e05252", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 4 }}>Factura recibida de proveedor</div>
+                <div style={{ fontSize: 20, color: "#1e293b", fontWeight: 600 }}>{formGasto.proveedor === "__nuevo__" ? formGasto.proveedorManual : formGasto.proveedor}</div>
+                {formGasto.cif && <div style={{ fontSize: 12, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace" }}>{formGasto.cif}</div>}
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace", lineHeight: 1.8 }}>
+                  <div>Fecha: {formGasto.fecha}</div>
+                  {formGasto.fechaVencimiento && <div>Vence pago: {formGasto.fechaVencimiento}</div>}
+                  <div>Categoría: {formGasto.categoria}</div>
+                </div>
+              </div>
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 12, color: "#334155", marginBottom: 6 }}>{formGasto.concepto}</div>
+              {formGasto.notas && <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace" }}>{formGasto.notas}</div>}
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <div style={{ width: 260 }}>
+                {[
+                  ["Base imponible", formatEURd(parseFloat(formGasto.base)||0), "#64748b"],
+                  [`IVA (${formGasto.iva}%)`, formatEURd((parseFloat(formGasto.base)||0)*formGasto.iva/100), "#7eb8f5"],
+                ].map(([k,v,c]) => (
+                  <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f1f5f9" }}>
+                    <span style={{ fontSize: 12, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace" }}>{k}</span>
+                    <span style={{ fontSize: 13, color: c, fontFamily: "'JetBrains Mono',monospace" }}>{v}</span>
+                  </div>
+                ))}
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "14px 10px", background: "#e05252", marginTop: 4, borderRadius: 4 }}>
+                  <span style={{ fontSize: 12, color: "#fff", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2 }}>TOTAL GASTO</span>
+                  <span style={{ fontSize: 22, color: "#fff", fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold" }}>{formatEURd(parseFloat(formGasto.total)||0)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={() => { guardarGastoManual(); setPrevisualizandoGasto(false); }} style={{ background: "#e05252", color: "#fff", border: "none", padding: "12px 32px", cursor: "pointer", fontSize: 11, letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase" }}>✓ Registrar gasto</button>
+            <button onClick={() => { setPrevisualizandoGasto(false); setSubtab("lista"); }} style={{ background: "none", border: "1px solid #e2e8f0", color: "#94a3b8", padding: "12px 20px", cursor: "pointer", fontSize: 11, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>Cancelar</button>
           </div>
         </div>
       )}
@@ -1767,7 +2378,7 @@ function Agente({ setFacturas, facturas, clientes, obras, proveedores }) {
     });
 
     // Facturas vencidas
-    const vencidas = (facturas||[]).filter(f => f.tipo === "ingreso" && f.estado === "Pendiente");
+    const vencidas = (facturas||[]).filter(f => f.tipo === "ingreso" && ["Pendiente","Emitida"].includes(f.estado));
     if (vencidas.length > 0) alertas.push({ tipo: "cobro", color: "#f0a500", msg: `${vencidas.length} factura${vencidas.length>1?"s":""} pendiente${vencidas.length>1?"s":""} de cobro por ${formatEURLocal(vencidas.reduce((s,f)=>s+(f.total||0),0))}`, icono: "💰" });
 
     // Gastos inusuales (deteccion simple)
@@ -2422,7 +3033,7 @@ export default function FactuCloudApp() {
         {tab === "analitica" && <Analitica facturas={facturas} obras={obras} />}
         {tab === "tesoreria" && <Tesoreria facturas={facturas} movimientos={movimientosList} setMovimientos={setMovimientos} />}
         {tab === "informes" && <Informes facturas={facturas} obras={obras} proveedores={proveedores} clientes={clientes} />}
-        {tab === "obras" && <Obras obras={obras} setObras={setObras} />}
+        {tab === "obras" && <Obras obras={obras} setObras={setObras} clientes={clientes} facturas={facturas} />}
         {tab === "proveedores" && <Proveedores proveedores={proveedores} setProveedores={setProveedores} />}
         {tab === "clientes" && <Clientes clientes={clientes} setClientes={setClientes} />}
         {tab === "nominas" && <Nominas empleados={empleados} setEmpleados={setEmpleados} />}
@@ -2609,6 +3220,8 @@ function Nominas({ empleados: empleadosProp, setEmpleados: setEmpleadosProp }) {
   const [subtab, setSubtab] = useState("empleados");
   const [nuevo, setNuevo] = useState(false);
   const [mesNomina, setMesNomina] = useState(new Date().getMonth());
+  const [editandoId, setEditandoId] = useState(null);
+  const [formEdit, setFormEdit] = useState({});
   const [form, setForm] = useState({
     nombre: "", dni: "", categoria: "", convenio: "Construcción y Obras Públicas", contrato: "Indefinido",
     salarioBruto: "", fechaAlta: "", proyecto: "", iban: "",
@@ -2653,6 +3266,27 @@ function Nominas({ empleados: empleadosProp, setEmpleados: setEmpleadosProp }) {
     setEmpleados(prev => [...prev, emp]);
     setNuevo(false);
     setForm({ nombre: "", dni: "", categoria: "", convenio: "Construcción y Obras Públicas", contrato: "Indefinido", salarioBruto: "", fechaAlta: "", proyecto: "", iban: "", hijos: 0, discapacidad: false, residente: true });
+  };
+
+  const abrirEdicion = (emp) => {
+    setFormEdit({ ...emp, irpfManual: emp.irpfManual !== undefined ? emp.irpfManual : "" });
+    setEditandoId(emp.id);
+    setNuevo(false);
+    window.scrollTo(0, 0);
+  };
+
+  const guardarEdicion = () => {
+    setEmpleados(prev => prev.map(e => e.id === editandoId ? {
+      ...e, ...formEdit,
+      salarioBruto: parseFloat(formEdit.salarioBruto) || e.salarioBruto,
+      hijos: parseInt(formEdit.hijos) || 0,
+      irpfManual: formEdit.irpfManual,
+      historialSalarial: parseFloat(formEdit.salarioBruto) !== e.salarioBruto
+        ? [...(e.historialSalarial||[]), { fecha: new Date().toLocaleDateString("es-ES"), salario: parseFloat(formEdit.salarioBruto), motivo: "Actualización manual" }]
+        : e.historialSalarial
+    } : e));
+    setEditandoId(null);
+    setFormEdit({});
   };
 
   const exportarNominaPDF = (emp) => {
@@ -2805,6 +3439,54 @@ function Nominas({ empleados: empleadosProp, setEmpleados: setEmpleadosProp }) {
               </div>
             </div>
           )}
+          {/* FORMULARIO DE EDICIÓN */}
+          {editandoId && (
+            <div style={{ background: "#f0f4ff", border: "1px solid #f0a50033", borderRadius: 3, padding: "24px 28px", marginBottom: 20 }}>
+              <div style={{ fontSize: 10, letterSpacing: 4, color: "#f0a500", fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 18 }}>Editar empleado — {formEdit.nombre}</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
+                {[["nombre","Nombre completo"],["dni","DNI / NIE"],["fechaAlta","Fecha de alta"],["salarioBruto","Salario bruto (€)"],["proyecto","Proyecto"],["iban","IBAN"]].map(([k,label]) => (
+                  <div key={k}>
+                    <div style={{ fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>{label}</div>
+                    <input value={formEdit[k]||""} onChange={e => setFormEdit(p => ({...p,[k]:e.target.value}))} style={{ width: "100%", background: "#ffffff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }} />
+                  </div>
+                ))}
+                <div>
+                  <div style={{ fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>Categoría</div>
+                  <select value={formEdit.categoria||""} onChange={e => setFormEdit(p => ({...p,categoria:e.target.value}))} style={{ width: "100%", background: "#ffffff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }}>
+                    {["Oficial 1ª","Oficial 2ª","Oficial 3ª","Peón especialista","Peón ordinario","Encargado","Director de proyecto","Administrativo"].map(c => <option key={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>Contrato</div>
+                  <select value={formEdit.contrato||""} onChange={e => setFormEdit(p => ({...p,contrato:e.target.value}))} style={{ width: "100%", background: "#ffffff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }}>
+                    {["Indefinido","Obra y servicio","Temporal","A tiempo parcial","Fijo discontinuo"].map(c => <option key={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>Hijos</div>
+                  <input type="number" min="0" value={formEdit.hijos||0} onChange={e => setFormEdit(p => ({...p,hijos:parseInt(e.target.value)||0}))} style={{ width: "100%", background: "#ffffff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }} />
+                </div>
+              </div>
+              <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #e2e8f0" }}>
+                <div style={{ fontSize: 10, color: "#f0a500", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 10 }}>Retención IRPF</div>
+                <div style={{ display: "flex", gap: 14, alignItems: "flex-end" }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 }}>IRPF manual (%) — dejar vacío para automático</div>
+                    <input type="number" min="0" max="45" step="0.5" value={formEdit.irpfManual||""} onChange={e => setFormEdit(p => ({...p,irpfManual:e.target.value}))} placeholder="Ej: 15 — vacío = automático por tramos" style={{ width: "100%", background: "#ffffff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" }} />
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, paddingBottom: 2 }}>
+                    <input type="checkbox" checked={formEdit.discapacidad||false} onChange={e => setFormEdit(p => ({...p,discapacidad:e.target.checked}))} style={{ width: 16, height: 16, accentColor: "#f0a500" }} />
+                    <span style={{ fontSize: 12, color: "#64748b", fontFamily: "'JetBrains Mono',monospace" }}>Discapacidad</span>
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+                <button onClick={guardarEdicion} style={{ background: "#f0a500", color: "#f8f9fa", border: "none", padding: "12px 28px", cursor: "pointer", fontSize: 11, letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase" }}>✓ Guardar cambios</button>
+                <button onClick={() => { setEditandoId(null); setFormEdit({}); }} style={{ background: "none", border: "1px solid #e2e8f0", color: "#94a3b8", padding: "12px 20px", cursor: "pointer", fontSize: 11, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>Cancelar</button>
+              </div>
+            </div>
+          )}
+
           {empleados.length === 0 && !nuevo
             ? <div style={{ textAlign: "center", padding: "60px 0", color: "#94a3b8", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, letterSpacing: 3 }}>Sin empleados - pulsa nuevo empleado</div>
             : <div style={{ display: "grid", gap: 12 }}>
@@ -2823,6 +3505,8 @@ function Nominas({ empleados: empleadosProp, setEmpleados: setEmpleadosProp }) {
                         </div>
                         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                           <button onClick={() => exportarNominaPDF(e)} style={{ background: "#4caf7d15", border: "1px solid #4caf7d33", color: "#4caf7d", padding: "6px 14px", cursor: "pointer", fontSize: 9, letterSpacing: 2, fontFamily: "'JetBrains Mono', monospace", borderRadius: 2, textTransform: "uppercase" }}>Nomina PDF</button>
+                          <button onClick={() => abrirEdicion(e)} style={{ background: "#f0a50015", border: "1px solid #f0a50033", color: "#f0a500", padding: "6px 14px", cursor: "pointer", fontSize: 9, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>✎ Editar</button>
+                          <button onClick={() => setEmpleados(prev => prev.filter(x => x.id !== e.id))} style={{ background: "#e0525215", border: "1px solid #e0525233", color: "#e05252", padding: "6px 10px", cursor: "pointer", fontSize: 9, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>✕</button>
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                             <span style={{ fontSize: 10, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace" }}>IRPF%:</span>
                             <input
@@ -3425,7 +4109,7 @@ function Tesoreria({ facturas, movimientos: movimientosProp, setMovimientos: set
   const totalPagos = pagos.reduce((s, m) => s + parseFloat(m.importe || 0), 0);
   const saldoPrevisto = totalCobros - totalPagos;
 
-  const cobrosFacturas = facturas.filter(f => f.tipo === "ingreso" && f.estado === "Pendiente").reduce((s, f) => s + (f.total || 0), 0);
+  const cobrosFacturas = facturas.filter(f => f.tipo === "ingreso" && ["Pendiente","Emitida"].includes(f.estado)).reduce((s, f) => s + (f.total || 0), 0);
   const pagosFacturas = facturas.filter(f => f.tipo === "gasto" && f.estado !== "Pagada").reduce((s, f) => s + (f.total || 0), 0);
   const saldoNeto = saldoPrevisto + cobrosFacturas - pagosFacturas;
 
@@ -3445,7 +4129,7 @@ function Tesoreria({ facturas, movimientos: movimientosProp, setMovimientos: set
   });
 
   // Aging cobros desde facturas
-  const facturasIngresoPendiente = facturas.filter(f => f.tipo === "ingreso" && f.estado !== "Cobrada");
+  const facturasIngresoPendiente = facturas.filter(f => f.tipo === "ingreso" && !["Cobrada","Pagada"].includes(f.estado));
   const aging = { "0-30": [], "31-60": [], "+60": [] };
   facturasIngresoPendiente.forEach(f => {
     const fecha = parseFecha(f.fecha);
@@ -3922,7 +4606,7 @@ function Informes({ facturas, obras, proveedores, clientes }) {
 
   const ingresos = facturas.filter(f => f.tipo === "ingreso").reduce((s, f) => s + (f.total || 0), 0);
   const gastos = facturas.filter(f => f.tipo === "gasto").reduce((s, f) => s + (f.total || 0), 0);
-  const pendienteCobro = facturas.filter(f => f.tipo === "ingreso" && f.estado === "Pendiente").reduce((s, f) => s + (f.total || 0), 0);
+  const pendienteCobro = facturas.filter(f => f.tipo === "ingreso" && ["Pendiente","Emitida"].includes(f.estado)).reduce((s, f) => s + (f.total || 0), 0);
   const ivaRepercutido = facturas.filter(f => f.tipo === "ingreso").reduce((s, f) => s + (f.iva || 0), 0);
   const ivaSoportado = facturas.filter(f => f.tipo === "gasto").reduce((s, f) => s + (f.iva || 0), 0);
 
