@@ -2093,7 +2093,11 @@ export default function FactuCloudApp() {
         ]);
         setObrasState(Array.isArray(o) ? o : []);
         setClientesState(Array.isArray(c) ? c : []);
-        setProveedoresState(Array.isArray(p) ? p : []);
+        setProveedoresState((Array.isArray(p) ? p : []).map(v => ({
+          ...v,
+          condicionesPago: v.condicionespago || v.condicionesPago || "30 días",
+          numeroCuenta: v.numerocuenta || v.numeroCuenta || "",
+        })));
         setFacturasState(Array.isArray(f) ? f : []);
         setEmpleadosState((Array.isArray(n) ? n : []).map(e => ({
           ...e,
@@ -2150,7 +2154,14 @@ export default function FactuCloudApp() {
   const setObras = (updater) => {
     setObrasState(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
-      next.filter(n => !prev.find(p => p.id === n.id)).forEach(n => sbPost("obras", n));
+      next.filter(n => !prev.find(p => p.id === n.id)).forEach(n => sbPost("obras", {
+        id: n.id, user_id: n.user_id,
+        nombre: n.nombre, cliente: n.cliente, direccion: n.direccion,
+        inicio: n.inicio, fin: n.fin, estado: n.estado,
+        presupuesto: n.presupuesto || 0, progreso: n.progreso || 0,
+        certificado: n.certificado || 0, incidencias: n.incidencias || 0,
+        color: n.color || "#f0a500"
+      }));
       prev.filter(p => !next.find(n => n.id === p.id)).forEach(p => sbDelete("obras", p.id));
       return next;
     });
@@ -2159,7 +2170,13 @@ export default function FactuCloudApp() {
   const setClientes = (updater) => {
     setClientesState(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
-      next.filter(n => !prev.find(p => p.id === n.id)).forEach(n => sbPost("clientes", n));
+      next.filter(n => !prev.find(p => p.id === n.id)).forEach(n => sbPost("clientes", {
+        id: n.id, user_id: n.user_id,
+        nombre: n.nombre, cif: n.cif,
+        contacto: n.contacto, email: n.email, tel: n.tel,
+        tipo: n.tipo, direccion: n.direccion, cp: n.cp, ciudad: n.ciudad,
+        facturado: n.facturado || 0, pendiente: n.pendiente || 0
+      }));
       prev.filter(p => !next.find(n => n.id === p.id)).forEach(p => sbDelete("clientes", p.id));
       return next;
     });
@@ -2168,7 +2185,16 @@ export default function FactuCloudApp() {
   const setProveedores = (updater) => {
     setProveedoresState(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
-      next.filter(n => !prev.find(p => p.id === n.id)).forEach(n => sbPost("proveedores", n));
+      next.filter(n => !prev.find(p => p.id === n.id)).forEach(n => sbPost("proveedores", {
+        id: n.id, user_id: n.user_id,
+        nombre: n.nombre, cif: n.cif,
+        contacto: n.contacto, email: n.email, tel: n.tel,
+        categoria: n.categoria, tipo: n.tipo,
+        condicionespago: n.condicionesPago || n.condicionespago || "",
+        numerocuenta: n.numeroCuenta || n.numerocuenta || "",
+        facturado: n.facturado || 0, pendiente: n.pendiente || 0,
+        direccion: n.direccion, cp: n.cp, ciudad: n.ciudad
+      }));
       prev.filter(p => !next.find(n => n.id === p.id)).forEach(p => sbDelete("proveedores", p.id));
       return next;
     });
@@ -2177,7 +2203,19 @@ export default function FactuCloudApp() {
   const setFacturas = (updater) => {
     setFacturasState(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
-      next.filter(n => !prev.find(p => p.id === n.id)).forEach(n => sbPost("facturas", n));
+      next.filter(n => !prev.find(p => p.id === n.id)).forEach(n => sbPost("facturas", {
+        id: n.id, user_id: n.user_id,
+        numero: n.numero || n.numeroFactura,
+        numerofactura: n.numeroFactura || n.numero,
+        cliente: typeof n.cliente === "string" ? n.cliente : n.cliente?.nombre || "",
+        concepto: n.concepto || n.obra || "",
+        fecha: n.fecha, fechavencimiento: n.fechaVencimiento || "",
+        base: n.base || 0, iva: n.iva || 0, irpf: n.irpf || 0, total: n.total || 0,
+        tipoiva: n.tipoIVA || 21, tipoirpf: n.tipoIRPF || 0,
+        estado: n.estado, tipo: n.tipo,
+        formapago: n.formaPago || "Transferencia bancaria",
+        notas: n.notas || "", auto: n.auto || false, manual: n.manual || false
+      }));
       prev.filter(p => !next.find(n => n.id === p.id)).forEach(p => sbDelete("facturas", p.id));
       return next;
     });
