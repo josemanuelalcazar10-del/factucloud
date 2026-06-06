@@ -6,23 +6,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 const SUPABASE_URL = "https://mlsvbmqpzgxlvghqsmpm.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1sc3ZibXFwemd4bHZnaHFzbXBtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAyMTg0NjAsImV4cCI6MjA5NTc5NDQ2MH0.htxKoUmhQ3Mhj6hdLZTpyDIjMjDvqLSZ15uxsI-Wm54";
 
-const sbFetch = async (table, method = "GET", body = null, id = null) => {
-  const url = `${SUPABASE_URL}/rest/v1/${table}${id ? `?id=eq.${id}` : ""}`;
-  const headers = {
-    "Content-Type": "application/json",
-    "apikey": SUPABASE_KEY,
-    "Authorization": `Bearer ${SUPABASE_KEY}`,
-  };
-  if (method === "POST" || method === "PATCH") headers["Prefer"] = "return=minimal";
-  const res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : null });
-  if (!res.ok) {
-    const err = await res.text();
-    console.error(`Supabase error [${method} ${table}]:`, err);
-    throw new Error(err);
-  }
-  const text = await res.text();
-  return text ? JSON.parse(text) : [];
-};
+
 
 
 // ════════════════════════════════════════
@@ -4148,14 +4132,14 @@ function ChatAyuda({ tabActual }) {
       const saludo = AYUDA_MODULOS[tabActual] || "Hola, soy tu asistente de FactuCloud. ¿En qué puedo ayudarte?";
       setMensajes([{ rol: "asistente", texto: "👋 ¡Hola! Soy tu asistente de FactuCloud.\n\n" + saludo + "\n\n¿Tienes alguna pregunta?" }]);
     }
-  }, [abierto]);
+  }, [abierto]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { // eslint-disable-line react-hooks/exhaustive-deps
     if (abierto && mensajes.length > 0) {
       const contexto = AYUDA_MODULOS[tabActual] || "";
       setMensajes([{ rol: "asistente", texto: "👋 Hola de nuevo. Ahora estás en el módulo de " + (tabActual.charAt(0).toUpperCase() + tabActual.slice(1)) + ".\n\n" + contexto + "\n\n¿Te puedo ayudar con algo?" }]);
     }
-  }, [tabActual]);
+  }, [tabActual]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
