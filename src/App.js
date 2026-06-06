@@ -24,7 +24,6 @@ const sbFetch = async (table, method = "GET", body = null, id = null) => {
   return text ? JSON.parse(text) : [];
 };
 
-const dbGet = (table) => sbFetch(table);
 
 // ════════════════════════════════════════
 // LOGIN
@@ -3944,7 +3943,7 @@ function PanelAdmin({ authToken, onLogout }) {
 
   useEffect(() => {
     cargarClientes();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const cargarClientes = async () => {
     setLoading(true);
@@ -4144,14 +4143,14 @@ function ChatAyuda({ tabActual }) {
   const [mostrarBurbuja, setMostrarBurbuja] = useState(true);
   const chatRef = useRef(null);
 
-  useEffect(() => {
+  useEffect(() => { // eslint-disable-line react-hooks/exhaustive-deps
     if (abierto && mensajes.length === 0) {
       const saludo = AYUDA_MODULOS[tabActual] || "Hola, soy tu asistente de FactuCloud. ¿En qué puedo ayudarte?";
       setMensajes([{ rol: "asistente", texto: "👋 ¡Hola! Soy tu asistente de FactuCloud.\n\n" + saludo + "\n\n¿Tienes alguna pregunta?" }]);
     }
   }, [abierto]);
 
-  useEffect(() => {
+  useEffect(() => { // eslint-disable-line react-hooks/exhaustive-deps
     if (abierto && mensajes.length > 0) {
       const contexto = AYUDA_MODULOS[tabActual] || "";
       setMensajes([{ rol: "asistente", texto: "👋 Hola de nuevo. Ahora estás en el módulo de " + (tabActual.charAt(0).toUpperCase() + tabActual.slice(1)) + ".\n\n" + contexto + "\n\n¿Te puedo ayudar con algo?" }]);
