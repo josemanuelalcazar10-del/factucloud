@@ -1004,7 +1004,7 @@ function Presupuestos({ facturas, setFacturas, lista: listaProp, setLista: setLi
     try {
       const res = await fetch("/api/anthropic", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-api-key": process.env.REACT_APP_ANTHROPIC_KEY || "", "anthropic-version": "2023-06-01" },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 2000,
@@ -1517,7 +1517,7 @@ function Contabilidad({ facturas, setFacturas, empresa: empProp, clientes: clien
     if (!input.trim()) return;
     setLoading(true); setError(""); setFactura(null);
     try {
-      const res = await fetch("/api/anthropic", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1500, system: FACTURA_PROMPT, messages: [{ role: "user", content: input }] }) });
+      const res = await fetch("/api/anthropic", { method: "POST", headers: { "Content-Type": "application/json", "x-api-key": process.env.REACT_APP_ANTHROPIC_KEY || "", "anthropic-version": "2023-06-01" }, body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1500, system: FACTURA_PROMPT, messages: [{ role: "user", content: input }] }) });
       const data = await res.json();
       const raw = data.content?.map(i => i.text || "").join("") || "";
       const parsed = JSON.parse(raw.replace(/```json|```/g, "").trim());
@@ -1541,7 +1541,7 @@ function Contabilidad({ facturas, setFacturas, empresa: empProp, clientes: clien
     try {
       const res = await fetch("/api/anthropic", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-api-key": process.env.REACT_APP_ANTHROPIC_KEY || "", "anthropic-version": "2023-06-01" },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 600,
@@ -2409,7 +2409,7 @@ function Agente({ setFacturas, facturas, clientes, obras, proveedores }) {
     await new Promise(r => setTimeout(r, 600));
     log(`🤖 Enviando a Claude IA...`, "ai");
     try {
-      const res = await fetch("/api/anthropic", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 800, system: AGENT_PROMPT, messages: [{ role: "user", content: c.txt }] }) });
+      const res = await fetch("/api/anthropic", { method: "POST", headers: { "Content-Type": "application/json", "x-api-key": process.env.REACT_APP_ANTHROPIC_KEY || "", "anthropic-version": "2023-06-01" }, body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 800, system: AGENT_PROMPT, messages: [{ role: "user", content: c.txt }] }) });
       const data = await res.json();
       const raw = data.content?.map(i => i.text || "").join("") || "";
       const parsed = JSON.parse(raw.replace(/```json|```/g, "").trim());
@@ -2485,7 +2485,7 @@ function Agente({ setFacturas, facturas, clientes, obras, proveedores }) {
       const historial = nuevosMensajes.slice(-8).map(m => ({ role: m.rol === "usuario" ? "user" : "assistant", content: m.texto }));
       const res = await fetch("/api/anthropic", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-api-key": process.env.REACT_APP_ANTHROPIC_KEY || "", "anthropic-version": "2023-06-01" },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 800,
@@ -3767,7 +3767,7 @@ function Documentos({ clientes, proveedores, obras, docs: docsProp, setDocs: set
     try {
       const res = await fetch("/api/anthropic", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-api-key": process.env.REACT_APP_ANTHROPIC_KEY || "", "anthropic-version": "2023-06-01" },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 3000,
@@ -4628,7 +4628,7 @@ function Informes({ facturas, obras, proveedores, clientes }) {
     try {
       const res = await fetch("/api/anthropic", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-api-key": process.env.REACT_APP_ANTHROPIC_KEY || "", "anthropic-version": "2023-06-01" },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 2000,
@@ -5026,7 +5026,7 @@ function Analitica({ facturas, obras }) {
     try {
       const res = await fetch("/api/anthropic", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-api-key": process.env.REACT_APP_ANTHROPIC_KEY || "", "anthropic-version": "2023-06-01" },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 1000,
@@ -5726,7 +5726,7 @@ function ChatAyuda({ tabActual }) {
     try {
       const res = await fetch("/api/anthropic", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-api-key": process.env.REACT_APP_ANTHROPIC_KEY || "", "anthropic-version": "2023-06-01" },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 400,
