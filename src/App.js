@@ -4,7 +4,6 @@ import { useState, useRef, useCallback, useEffect } from "react";
 // SUPABASE CONFIG
 // ════════════════════════════════════════
 const SUPABASE_URL = "https://mlsvbmqpzgxlvghqsmpm.supabase.co";
-const ANTHROPIC_KEY = process.env.REACT_APP_ANTHROPIC_KEY || "";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1sc3ZibXFwemd4bHZnaHFzbXBtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAyMTg0NjAsImV4cCI6MjA5NTc5NDQ2MH0.htxKoUmhQ3Mhj6hdLZTpyDIjMjDvqLSZ15uxsI-Wm54";
 
 
