@@ -1003,9 +1003,9 @@ function Presupuestos({ facturas, setFacturas, lista: listaProp, setLista: setLi
     const contextoHistorico = preciosHistoricos ? `Referencia de precios historicos de esta empresa: ${preciosHistoricos}.` : "";
     const instruccionMargen = margen > 0 ? `Aplica un margen de beneficio del ${margen}% sobre los costes en los precios unitarios.` : "";
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/anthropic", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 2000,
@@ -1518,7 +1518,7 @@ function Contabilidad({ facturas, setFacturas, empresa: empProp, clientes: clien
     if (!input.trim()) return;
     setLoading(true); setError(""); setFactura(null);
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" }, body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1500, system: FACTURA_PROMPT, messages: [{ role: "user", content: input }] }) });
+      const res = await fetch("/api/anthropic", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1500, system: FACTURA_PROMPT, messages: [{ role: "user", content: input }] }) });
       const data = await res.json();
       const raw = data.content?.map(i => i.text || "").join("") || "";
       const parsed = JSON.parse(raw.replace(/```json|```/g, "").trim());
@@ -1540,9 +1540,9 @@ function Contabilidad({ facturas, setFacturas, empresa: empProp, clientes: clien
     if (!gastoDesc.trim()) return;
     setLoadingDeduccion(true); setDeduccion(null);
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/anthropic", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 600,
@@ -2410,7 +2410,7 @@ function Agente({ setFacturas, facturas, clientes, obras, proveedores }) {
     await new Promise(r => setTimeout(r, 600));
     log(`🤖 Enviando a Claude IA...`, "ai");
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" }, body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 800, system: AGENT_PROMPT, messages: [{ role: "user", content: c.txt }] }) });
+      const res = await fetch("/api/anthropic", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 800, system: AGENT_PROMPT, messages: [{ role: "user", content: c.txt }] }) });
       const data = await res.json();
       const raw = data.content?.map(i => i.text || "").join("") || "";
       const parsed = JSON.parse(raw.replace(/```json|```/g, "").trim());
@@ -2484,9 +2484,9 @@ function Agente({ setFacturas, facturas, clientes, obras, proveedores }) {
 
     try {
       const historial = nuevosMensajes.slice(-8).map(m => ({ role: m.rol === "usuario" ? "user" : "assistant", content: m.texto }));
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/anthropic", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 800,
@@ -3766,9 +3766,9 @@ function Documentos({ clientes, proveedores, obras, docs: docsProp, setDocs: set
     if (!inputIA.trim()) return;
     setLoadingIA(true); setDocGenerado(null);
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/anthropic", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 3000,
@@ -4627,9 +4627,9 @@ function Informes({ facturas, obras, proveedores, clientes }) {
       Fecha: ${new Date().toLocaleDateString("es-ES", { month: "long", year: "numeric" })}.
     `;
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/anthropic", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 2000,
@@ -5025,9 +5025,9 @@ function Analitica({ facturas, obras }) {
       ? obras.map(o => `Obra: ${o.nombre}, Presupuesto: ${o.presupuesto}€, Progreso: ${o.progreso}%, Inicio: ${o.inicio}, Fin: ${o.fin}, Estado: ${o.estado}`).join(". ")
       : "No hay proyectos registrados aún. Genera una previsión de ejemplo para una empresa de construcción mediana con 2-3 obras activas de entre 200.000€ y 800.000€.";
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/anthropic", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 1000,
@@ -5725,9 +5725,9 @@ function ChatAyuda({ tabActual }) {
     setMensajes(prev => [...prev, { rol: "usuario", texto: pregunta }]);
     setLoading(true);
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/anthropic", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 400,
