@@ -2487,7 +2487,7 @@ function Agente({ setFacturas, facturas, clientes, obras, proveedores, setClient
   };
   const [activo, setActivo] = useState(false);
   const [estado, setEstado] = useState("idle");
-  const [logs, setLogs] = useState([]);
+  const [logsChat, setLogsChat] = useState([]);
   const [procesadas, setProcesadas] = useState(0);
   const [mensajes, setMensajes] = useState([
     { rol: "asistente", texto: "Hola, soy tu consultor financiero IA. Tengo acceso a todos tus datos de FactuCloud.\n\nPuedo ayudarte con:\n• Consultas sobre tus datos (IVA, clientes, liquidez...)\n• Dudas de uso de la plataforma\n• Alertas y recomendaciones proactivas\n\n¿En qué te ayudo?" }
@@ -2541,7 +2541,7 @@ function Agente({ setFacturas, facturas, clientes, obras, proveedores, setClient
   }, [facturas]);
 
   const log = useCallback((msg, tipo = "info") => {
-    setLogs(prev => [...prev.slice(-60), { id: Date.now() + Math.random(), msg, tipo, h: new Date().toLocaleTimeString("es-ES") }]);
+    setLogsChat(prev => [...prev.slice(-60), { id: Date.now() + Math.random(), msg, tipo, h: new Date().toLocaleTimeString("es-ES") }]);
     setTimeout(() => { if (logsRef.current) logsRef.current.scrollTop = logsRef.current.scrollHeight; }, 50);
   }, []);
 
