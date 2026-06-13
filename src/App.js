@@ -2340,8 +2340,151 @@ const CORREOS = [
   { id:3, t:9000, de:"facturas@cimentaciones-sur.com", asunto:"Certificacion obra Nave Industrial — Mayo", txt:"Certificacion nro 3 trabajos cimentacion Nave Industrial Poligono Norte. Pilotaje y encepados ejecutados segun proyecto. Base: 18.500€. IVA 21%: 3.885€. Total: 22.385€." },
 ];
 
-function Agente({ setFacturas, facturas, clientes, obras, proveedores }) {
+function Agente({ setFacturas, facturas, clientes, obras, proveedores, setClientes, setProveedores }) {
+  const GMAIL_CLIENT_ID = "473799407537-jscp80uoumlhfra3blgn6lp9npqk3acl.apps.googleusercontent.com";
+  const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
   const [subtab, setSubtab] = useState("chat");
+  const [gmailToken, setGmailToken] = useState(() => { try { return localStorage.getItem("fc_gmail_token"); } catch { return null; } });
+  const [procesando, setProcesando] = useState(false);
+  const [logs, setLogs] = useState([]);
+  const [facturasAgente, setFacturasAgente] = useState([]);
+
+  const addLog = (msg, tipo = "info") => setLogs(prev => [...prev, { msg, tipo }]);
+
+  const conectarGmail = () => {
+    const params = new URLSearchParams({
+      client_id: GMAIL_CLIENT_ID,
+      redirect_uri: window.location.origin,
+      response_type: "token",
+      scope: GMAIL_SCOPE,
+      prompt: "consent",
+    });
+    const popup = window.open(`https://accounts.google.com/o/oauth2/v2/auth?${params}`, "gmail_auth", "width=500,height=600");
+    const interval = setInterval(() => {
+      try {
+        const url = popup.location.href;
+        if (url.includes("access_token")) {
+          const hash = new URLSearchParams(popup.location.hash.substring(1));
+          const token = hash.get("access_token");
+          if (token) {
+            setGmailToken(token);
+            try { localStorage.setItem("fc_gmail_token", token); } catch {}
+            popup.close();
+            clearInterval(interval);
+            addLog("Gmail conectado correctamente", "ok");
+          }
+        }
+      } catch {}
+      if (popup.closed) clearInterval(interval);
+    }, 500);
+  };
+
+  const procesarFacturasGmail = async () => {
+    if (!gmailToken) return;
+    setProcesando(true);
+    setLogs([]);
+    setFacturasAgente([]);
+    try {
+      addLog("Buscando emails con facturas...", "info");
+      const searchRes = await fetch(
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages?q=has:attachment+filename:pdf+newer_than:30d&maxResults=10",
+        { headers: { Authorization: `Bearer ${gmailToken}` } }
+      );
+      if (!searchRes.ok) { addLog("Error al acceder a Gmail — reconecta", "error"); setProcesando(false); setGmailToken(null); return; }
+      const searchData = await searchRes.json();
+      const messages = searchData.messages || [];
+      addLog(`${messages.length} emails con PDFs encontrados`, "info");
+
+      for (const msg of messages.slice(0, 5)) {
+        const msgRes = await fetch(
+          `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}`,
+          { headers: { Authorization: `Bearer ${gmailToken}` } }
+        );
+        const msgData = await msgRes.json();
+        const subject = msgData.payload?.headers?.find(h => h.name === "Subject")?.value || "Sin asunto";
+        const from = msgData.payload?.headers?.find(h => h.name === "From")?.value || "";
+        addLog(`📎 "${subject}" de ${from}`, "info");
+
+        // Buscar adjuntos PDF
+        const parts = msgData.payload?.parts || [];
+        const pdfPart = parts.find(p => p.mimeType === "application/pdf" || p.filename?.endsWith(".pdf"));
+        if (!pdfPart) { addLog("Sin PDF adjunto — saltando", "info"); continue; }
+
+        // Obtener el PDF en base64
+        const attRes = await fetch(
+          `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}/attachments/${pdfPart.body.attachmentId}`,
+          { headers: { Authorization: `Bearer ${gmailToken}` } }
+        );
+        const attData = await attRes.json();
+        const pdfBase64 = attData.data.replace(/-/g, "+").replace(/_/g, "/");
+
+        addLog("🤖 Enviando a Claude IA para extraer datos...", "ai");
+
+        // Enviar a Claude para extraer datos de la factura
+        const claudeRes = await fetch("/api/anthropic", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "claude-sonnet-4-5",
+            max_tokens: 1000,
+            messages: [{
+              role: "user",
+              content: [
+                { type: "document", source: { type: "base64", media_type: "application/pdf", data: pdfBase64 } },
+                { type: "text", text: "Extrae los datos de esta factura y responde SOLO en JSON con este formato exacto: {proveedor, cif, concepto, base, iva, total, fecha, numeroFactura}. Devuelve solo el JSON sin texto adicional." }
+              ]
+            }]
+          })
+        });
+        const claudeData = await claudeRes.json();
+        const texto = claudeData.content?.[0]?.text || "{}";
+        let factura;
+        try {
+          const clean = texto.replace(/```json|```/g, "").trim();
+          factura = JSON.parse(clean);
+        } catch { addLog("Error al parsear respuesta IA", "error"); continue; }
+
+        addLog(`✓ Factura extraída: ${factura.proveedor} — ${factura.total}€`, "ok");
+
+        // Crear proveedor si no existe
+        if (factura.proveedor && setProveedores) {
+          const existe = (proveedores || []).find(p => p.nombre === factura.proveedor || p.cif === factura.cif);
+          if (!existe) {
+            setProveedores(prev => [...prev, { id: Date.now(), nombre: factura.proveedor, cif: factura.cif || "", email: "", tel: "", categoria: "Otros", condicionesPago: "30 días", facturado: 0, pendiente: 0 }]);
+            addLog(`✓ Proveedor "${factura.proveedor}" creado automáticamente`, "ok");
+          }
+        }
+
+        // Registrar factura
+        if (setFacturas && factura.total > 0) {
+          setFacturas(prev => [...prev, {
+            id: Date.now(),
+            numero: factura.numeroFactura || `G-${Date.now()}`,
+            numeroFactura: factura.numeroFactura || `G-${Date.now()}`,
+            cliente: factura.proveedor,
+            concepto: factura.concepto || subject,
+            fecha: factura.fecha || new Date().toLocaleDateString("es-ES"),
+            base: factura.base || 0,
+            iva: (factura.base || 0) * (factura.iva || 21) / 100,
+            total: factura.total,
+            tipoIVA: factura.iva || 21,
+            estado: "Pendiente",
+            tipo: "gasto",
+            auto: true,
+            origen: "gmail"
+          }]);
+          addLog(`✓ Gasto de ${factura.total}€ registrado en Contabilidad`, "ok");
+        }
+
+        setFacturasAgente(prev => [...prev, { ...factura, registrada: true }]);
+        await new Promise(r => setTimeout(r, 500));
+      }
+      addLog("✓ Proceso completado", "ok");
+    } catch (e) {
+      addLog(`Error: ${e.message}`, "error");
+    }
+    setProcesando(false);
+  };
   const [activo, setActivo] = useState(false);
   const [estado, setEstado] = useState("idle");
   const [logs, setLogs] = useState([]);
@@ -2609,778 +2752,83 @@ Responde siempre en español, de forma directa y concisa. Cuando cites cifras us
 
       {/* AGENTE AUTONOMO */}
       {subtab === "agente" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 16 }}>
-          <div style={{ background: "#f8f9fa", border: "1px solid #f1f5f9", borderRadius: 3 }}>
-            <div style={{ padding: "12px 18px", borderBottom: "1px solid #f1f5f9", display: "flex", alignItems: "center", gap: 8 }}>
-              {["#e05252","#e0a020","#4caf7d"].map(c => <div key={c} style={{ width: 8, height: 8, borderRadius: "50%", background: c }} />)}
-              <span style={{ marginLeft: 10, fontSize: 10, color: "#222", letterSpacing: 3 }}>TERMINAL — AGENTE LOG</span>
-              {activo && <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}><div style={{ width: 6, height: 6, borderRadius: "50%", background: "#4caf7d" }} /><span style={{ fontSize: 9, color: "#4caf7d", letterSpacing: 3 }}>LIVE</span></div>}
-            </div>
-            <div ref={logsRef} style={{ height: 400, overflowY: "auto", padding: "14px 18px" }}>
-              {logs.length === 0
-                ? <div style={{ color: "#1e293b", fontSize: 12, lineHeight: 2 }}>{"$ Agente en espera..."}<br/>{"$ Pulsa INICIAR para comenzar"}<br/><br/><span style={{ color: "#111" }}>{"$ Funciones:"}</span><br/><span style={{ color: "#111" }}>{"$ · Procesar facturas de correo"}</span><br/><span style={{ color: "#111" }}>{"$ · Detectar duplicados"}</span><br/><span style={{ color: "#111" }}>{"$ · Alertar gastos inusuales"}</span></div>
-                : logs.map(l => l.tipo === "div"
-                  ? <div key={l.id} style={{ color: "#111", fontSize: 11 }}>{l.msg}</div>
-                  : <div key={l.id} style={{ display: "flex", gap: 10, marginBottom: 3 }}>
-                      <span style={{ color: "#1e293b", fontSize: 10, flexShrink: 0, marginTop: 2 }}>{l.h}</span>
-                      <span style={{ color: COL[l.tipo], fontSize: 12, lineHeight: 1.6 }}>{l.msg}</span>
-                    </div>
-                )
-              }
-            </div>
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 3, padding: "20px" }}>
-              <div style={{ fontSize: 10, letterSpacing: 4, color: "#f0a500", textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace", marginBottom: 16 }}>Control</div>
-              {!activo
-                ? <button onClick={iniciar} style={{ width: "100%", background: "#4caf7d", color: "#f8f9fa", border: "none", padding: "14px", cursor: "pointer", fontSize: 11, letterSpacing: 4, textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace", fontWeight: "bold", borderRadius: 2 }}>INICIAR AGENTE</button>
-                : <button onClick={detener} style={{ width: "100%", background: "rgba(224,82,82,0.15)", color: "#e05252", border: "1px solid rgba(224,82,82,0.3)", padding: "14px", cursor: "pointer", fontSize: 11, letterSpacing: 4, textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace", borderRadius: 2 }}>DETENER</button>
-              }
-            </div>
-            <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 3, padding: "20px" }}>
-              <div style={{ fontSize: 10, letterSpacing: 4, color: "#f0a500", textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace", marginBottom: 14 }}>Capacidades</div>
-              {[["Procesar facturas correo","#4caf7d"],["Deteccion de duplicados","#4caf7d"],["Alertas gastos inusuales","#4caf7d"],["Alertas fiscales 15 dias","#4caf7d"]].map(([k,c]) => (
-                <div key={k} style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 0", borderBottom: "1px solid #f1f5f9" }}>
-                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: c, flexShrink: 0 }} />
-                  <span style={{ fontSize: 11, color: "#64748b", fontFamily: "'JetBrains Mono', monospace" }}>{k}</span>
-                </div>
-              ))}
-            </div>
-            <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 3, padding: "20px" }}>
-              <div style={{ fontSize: 10, letterSpacing: 4, color: "#f0a500", textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace", marginBottom: 14 }}>Estadisticas</div>
-              {[["Procesadas", procesadas, "#4caf7d"], ["Estado", estado === "idle" ? "En espera" : "Procesando", estado === "procesando" ? "#f0a500" : "#444"], ["Tiempo ahorrado", `~${procesadas * 8} min`, "#7eb8f5"]].map(([k,v,c]) => (
-                <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f1f5f9" }}>
-                  <span style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'JetBrains Mono', monospace" }}>{k}</span>
-                  <span style={{ fontSize: 13, color: c }}>{v}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-      <style>{`@keyframes pulse { 0%,100%{opacity:.3} 50%{opacity:1} }`}</style>
-    </div>
-  );
-}
-
-// ════════════════════════════════════════
-// APP RAÍZ
-// ════════════════════════════════════════
-export default function FactuCloudApp() {
-  const [loggedIn, setLoggedIn] = useState(false);
-  const [authToken, setAuthToken] = useState(null);
-  const [authUser, setAuthUser] = useState(null);
-  const [esAdmin, setEsAdmin] = useState(false);
-  const [tab, setTab] = useState("dashboard");
-  const [obras, setObrasState] = useState(OBRAS_INIT);
-  const [clientes, setClientesState] = useState(CLIENTES_INIT);
-  const [proveedores, setProveedoresState] = useState(PROVEEDORES_INIT);
-  const [facturas, setFacturasState] = useState(FACTURAS_INIT);
-  const [empleados, setEmpleadosState] = useState([]);
-  const [presupuestosList, setPresupuestosState] = useState([]);
-  const [documentosList, setDocumentosState] = useState([]);
-  const [movimientosList, setMovimientosState] = useState([]);
-  const [dbReady, setDbReady] = useState(false);
-  const [dbError, setDbError] = useState(false);
-  const [onboardingDone, setOnboardingDone] = useState(() => {
-    try { return localStorage.getItem("fc_onboarding") === "done"; } catch { return false; }
-  });
-  const [empresa, setEmpresa] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("fc_empresa") || "null") || { nombre: "", cif: "", direccion: "", cp: "", ciudad: "", email: "", tel: "", iban: "", prefijoFactura: "F", nextNumero: 1, tipoIVA: 21 }; }
-    catch { return { nombre: "", cif: "", direccion: "", cp: "", ciudad: "", email: "", tel: "", iban: "", prefijoFactura: "F", nextNumero: 1, tipoIVA: 21 }; }
-  });
-
-  // Cargar datos de Supabase al hacer login
-  useEffect(() => {
-    if (!loggedIn || !authToken) return;
-    const cargar = async () => {
-      try {
-        const headers = { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${authToken}` };
-        const get = (tabla) => fetch(`${SUPABASE_URL}/rest/v1/${tabla}`, { headers }).then(r => r.json());
-        const [o, c, p, f, n, pr, d, m] = await Promise.all([
-          get("obras"), get("clientes"), get("proveedores"), get("facturas"),
-          get("nominas"), get("presupuestos"), get("documentos"), get("movimientos")
-        ]);
-        setObrasState(Array.isArray(o) ? o : []);
-        setClientesState(Array.isArray(c) ? c : []);
-        setProveedoresState((Array.isArray(p) ? p : []).map(v => ({
-          ...v,
-          condicionesPago: v.condicionespago || v.condicionesPago || "30 días",
-          numeroCuenta: v.numerocuenta || v.numeroCuenta || "",
-        })));
-        setFacturasState(Array.isArray(f) ? f : []);
-        setEmpleadosState((Array.isArray(n) ? n : []).map(e => ({
-          ...e,
-          salarioBruto: e.salariobruto || e.salarioBruto || 0,
-          fechaAlta: e.fechaalta || e.fechaAlta || "",
-          historialSalarial: e.historialsalarial ? JSON.parse(e.historialsalarial) : (e.historialSalarial ? JSON.parse(e.historialSalarial) : [])
-        })));
-        setPresupuestosState((Array.isArray(pr) ? pr : []).map(p => ({
-          ...p,
-          totalMat: p.totalmat || p.totalMat || 0,
-          totalSub: p.totalsub || p.totalSub || 0,
-          validezDias: p.validezdias || p.validezDias || 30,
-          creadoEn: p.creadoen || p.creadoEn || "",
-          materiales: p.materiales ? JSON.parse(p.materiales) : [],
-          subcontratas: p.subcontratas ? JSON.parse(p.subcontratas) : [],
-          fases: p.fases ? JSON.parse(p.fases) : []
-        })));
-        setDocumentosState((Array.isArray(d) ? d : []).map(doc => ({
-          ...doc,
-          vinculoTipo: doc.vinculotipo || doc.vinculoTipo || "ninguno",
-          versiones: doc.versiones ? JSON.parse(doc.versiones) : []
-        })));
-        setMovimientosState(Array.isArray(m) ? m : []);
-        setDbReady(true);
-      } catch (e) {
-        console.error("Error cargando datos:", e);
-        setDbError(true);
-        setDbReady(true);
-      }
-    };
-    cargar();
-  }, [loggedIn, authToken]);
-
-  // Wrappers que sincronizan con Supabase usando token del usuario
-  const sbPost = (tabla, row) => {
-    const token = authToken || SUPABASE_KEY;
-    const r = { ...row, id: typeof row.id === "number" ? row.id : Number(row.id), user_id: authUser?.id };
-    fetch(`${SUPABASE_URL}/rest/v1/${tabla}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "apikey": SUPABASE_KEY, "Authorization": `Bearer ${token}`, "Prefer": "return=minimal" },
-      body: JSON.stringify(r)
-    }).then(res => { if (!res.ok) res.text().then(t => console.error("Supabase POST error:", t)); })
-    .catch(e => console.error("Supabase fetch error:", e));
-  };
-
-  const sbDelete = (tabla, id) => {
-    const token = authToken || SUPABASE_KEY;
-    fetch(`${SUPABASE_URL}/rest/v1/${tabla}?id=eq.${id}`, {
-      method: "DELETE",
-      headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${token}` }
-    }).catch(e => console.error("Supabase delete error:", e));
-  };
-
-  const setObras = (updater) => {
-    setObrasState(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      next.filter(n => !prev.find(p => p.id === n.id)).forEach(n => sbPost("obras", {
-        id: n.id, user_id: n.user_id,
-        nombre: n.nombre, cliente: n.cliente, direccion: n.direccion,
-        inicio: n.inicio, fin: n.fin, estado: n.estado,
-        presupuesto: n.presupuesto || 0, progreso: n.progreso || 0,
-        certificado: n.certificado || 0, incidencias: n.incidencias || 0,
-        color: n.color || "#f0a500"
-      }));
-      prev.filter(p => !next.find(n => n.id === p.id)).forEach(p => sbDelete("obras", p.id));
-      return next;
-    });
-  };
-
-  const setClientes = (updater) => {
-    setClientesState(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      next.filter(n => !prev.find(p => p.id === n.id)).forEach(n => sbPost("clientes", {
-        id: n.id, user_id: n.user_id,
-        nombre: n.nombre, cif: n.cif,
-        contacto: n.contacto, email: n.email, tel: n.tel,
-        tipo: n.tipo, direccion: n.direccion, cp: n.cp, ciudad: n.ciudad,
-        facturado: n.facturado || 0, pendiente: n.pendiente || 0
-      }));
-      prev.filter(p => !next.find(n => n.id === p.id)).forEach(p => sbDelete("clientes", p.id));
-      return next;
-    });
-  };
-
-  const setProveedores = (updater) => {
-    setProveedoresState(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      next.filter(n => !prev.find(p => p.id === n.id)).forEach(n => sbPost("proveedores", {
-        id: n.id, user_id: n.user_id,
-        nombre: n.nombre, cif: n.cif,
-        contacto: n.contacto, email: n.email, tel: n.tel,
-        categoria: n.categoria, tipo: n.tipo,
-        condicionespago: n.condicionesPago || n.condicionespago || "",
-        numerocuenta: n.numeroCuenta || n.numerocuenta || "",
-        facturado: n.facturado || 0, pendiente: n.pendiente || 0,
-        direccion: n.direccion, cp: n.cp, ciudad: n.ciudad
-      }));
-      prev.filter(p => !next.find(n => n.id === p.id)).forEach(p => sbDelete("proveedores", p.id));
-      return next;
-    });
-  };
-
-  const setFacturas = (updater) => {
-    setFacturasState(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      next.filter(n => !prev.find(p => p.id === n.id)).forEach(n => sbPost("facturas", {
-        id: n.id, user_id: n.user_id,
-        numero: n.numero || n.numeroFactura,
-        numerofactura: n.numeroFactura || n.numero,
-        cliente: typeof n.cliente === "string" ? n.cliente : n.cliente?.nombre || "",
-        concepto: n.concepto || n.obra || "",
-        fecha: n.fecha, fechavencimiento: n.fechaVencimiento || "",
-        base: n.base || 0, iva: n.iva || 0, irpf: n.irpf || 0, total: n.total || 0,
-        tipoiva: n.tipoIVA || 21, tipoirpf: n.tipoIRPF || 0,
-        estado: n.estado, tipo: n.tipo,
-        formapago: n.formaPago || "Transferencia bancaria",
-        notas: n.notas || "", auto: n.auto || false, manual: n.manual || false
-      }));
-      prev.filter(p => !next.find(n => n.id === p.id)).forEach(p => sbDelete("facturas", p.id));
-      return next;
-    });
-  };
-
-  const setEmpleados = (updater) => {
-    setEmpleadosState(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      next.filter(n => !prev.find(p => p.id === n.id)).forEach(n => sbPost("nominas", {
-        id: n.id, user_id: n.user_id,
-        nombre: n.nombre, dni: n.dni, categoria: n.categoria,
-        convenio: n.convenio, contrato: n.contrato,
-        salariobruto: n.salarioBruto || n.salariobruto,
-        fechaalta: n.fechaAlta || n.fechaalta,
-        proyecto: n.proyecto, iban: n.iban,
-        hijos: n.hijos, discapacidad: n.discapacidad, residente: n.residente,
-        historialsalarial: JSON.stringify(n.historialSalarial || n.historialsalarial || [])
-      }));
-      prev.filter(p => !next.find(n => n.id === p.id)).forEach(p => sbDelete("nominas", p.id));
-      return next;
-    });
-  };
-
-  const setPresupuestos = (updater) => {
-    setPresupuestosState(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      next.filter(n => !prev.find(p => p.id === n.id)).forEach(n => sbPost("presupuestos", {
-        id: n.id, user_id: n.user_id,
-        titulo: n.titulo, obra: n.obra, cliente: n.cliente,
-        fecha: n.fecha, validez: n.validez,
-        total: n.total,
-        totalmat: n.totalMat || n.totalmat || 0,
-        totalsub: n.totalSub || n.totalsub || 0,
-        estado: n.estado,
-        margen: n.margen,
-        validezdias: n.validezDias || n.validezdias || 30,
-        creadoen: n.creadoEn || n.creadoen || "",
-        observaciones: n.observaciones || "",
-        materiales: JSON.stringify(n.materiales || []),
-        subcontratas: JSON.stringify(n.subcontratas || []),
-        fases: JSON.stringify(n.fases || [])
-      }));
-      prev.filter(p => !next.find(n => n.id === p.id)).forEach(p => sbDelete("presupuestos", p.id));
-      return next;
-    });
-  };
-
-  const setDocumentos = (updater) => {
-    setDocumentosState(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      next.filter(n => !prev.find(p => p.id === n.id)).forEach(n => sbPost("documentos", {
-        id: n.id, user_id: n.user_id,
-        nombre: n.nombre, tipo: n.tipo,
-        vinculo: n.vinculo,
-        vinculotipo: n.vinculoTipo || n.vinculotipo || "",
-        fecha: n.fecha, vencimiento: n.vencimiento,
-        notas: n.notas, contenido: n.contenido, subido: n.subido,
-        versiones: JSON.stringify(n.versiones || [])
-      }));
-      prev.filter(p => !next.find(n => n.id === p.id)).forEach(p => sbDelete("documentos", p.id));
-      return next;
-    });
-  };
-
-  const setMovimientos = (updater) => {
-    setMovimientosState(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      next.filter(n => !prev.find(p => p.id === n.id)).forEach(n => sbPost("movimientos", n));
-      prev.filter(p => !next.find(n => n.id === p.id)).forEach(p => sbDelete("movimientos", p.id));
-      return next;
-    });
-  };
-
-  const TABS = [
-    { id: "dashboard", icon: "◈", label: "Dashboard" },
-    { id: "analitica", icon: "📊", label: "Analítica" },
-    { id: "tesoreria", icon: "💳", label: "Tesorería" },
-    { id: "informes", icon: "📋", label: "Informes IA" },
-    { id: "obras", icon: "⬡", label: "Proyectos" },
-    { id: "proveedores", icon: "◆", label: "Proveedores" },
-    { id: "clientes", icon: "◉", label: "Clientes" },
-    { id: "nominas", icon: "👷", label: "Nóminas" },
-    { id: "presupuestos", icon: "✦", label: "Presupuestos" },
-    { id: "contabilidad", icon: "≋", label: "Contabilidad" },
-    { id: "documentos", icon: "📄", label: "Documentos" },
-    { id: "agente", icon: "⚡", label: "Agente IA" },
-  ];
-
-  const factAuto = facturas.filter(f => f.auto).length;
-
-  if (!loggedIn) return <Login onLogin={(token, user) => {
-    setAuthToken(token);
-    setAuthUser(user);
-    setEsAdmin(user?.email === ADMIN_EMAIL);
-    setLoggedIn(true);
-  }} />;
-
-  if (!dbReady) return (
-    <div style={{ minHeight: "100vh", background: "#f8f9fa", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'JetBrains Mono', monospace" }}>
-      <div style={{ textAlign: "center" }}>
-        <div style={{ fontSize: 10, letterSpacing: 6, color: "#f0a500", textTransform: "uppercase", marginBottom: 20 }}>Conectando base de datos...</div>
-        <div style={{ display: "flex", gap: 6, justifyContent: "center" }}>
-          {[0,1,2].map(i => <div key={i} style={{ width: 8, height: 8, borderRadius: "50%", background: "#f0a500", opacity: 0.3, animation: `pulse 1s ${i*0.2}s infinite` }} />)}
-        </div>
-      </div>
-      <style>{`@keyframes pulse { 0%,100%{opacity:.3} 50%{opacity:1} }`}</style>
-    </div>
-  );
-
-  // Onboarding primer login
-  if (dbReady && !esAdmin && !onboardingDone) return (
-    <div translate="no" style={{ minHeight: "100vh", background: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Plus Jakarta Sans','Inter',sans-serif" }}>
-      <div style={{ maxWidth: 640, width: "100%", padding: "0 24px" }}>
-        <div style={{ textAlign: "center", marginBottom: 40 }}>
-          <div style={{ fontSize: 10, letterSpacing: 6, color: "#f0a500", textTransform: "uppercase", fontFamily: "'JetBrains Mono',monospace", marginBottom: 10 }}>Bienvenido a</div>
-          <div style={{ fontSize: 42, fontWeight: 300, marginBottom: 8 }}><span style={{ color: "#f0a500", fontWeight: 700 }}>Factu</span><span style={{ color: "#1e293b" }}>Cloud</span></div>
-          <div style={{ fontSize: 14, color: "#64748b", marginTop: 8 }}>Tu plataforma de gestión empresarial con IA para el sector construcción</div>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 32 }}>
-          {[
-            ["⬡", "Proyectos", "Gestiona tus obras, presupuesto y avance en tiempo real"],
-            ["≋", "Contabilidad", "Facturas, IVA, IRPF y calendario fiscal automático"],
-            ["✦", "Presupuestos IA", "Genera presupuestos detallados con IA en segundos"],
-            ["⚡", "Agente IA", "Procesa facturas automáticamente y consulta tus datos"],
-            ["👷", "Nóminas", "Calcula nóminas con IRPF real según convenio de construcción"],
-            ["📄", "Documentos", "Genera contratos y NDAs con IA listos para firmar"],
-          ].map(([icon, titulo, desc]) => (
-            <div key={titulo} style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 8, padding: "20px" }}>
-              <div style={{ fontSize: 24, marginBottom: 8 }}>{icon}</div>
-              <div style={{ fontSize: 13, color: "#1e293b", fontWeight: 600, marginBottom: 4 }}>{titulo}</div>
-              <div style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.6 }}>{desc}</div>
-            </div>
-          ))}
-        </div>
-        <div style={{ background: "#ffffff", border: "1px solid #f0a50033", borderRadius: 8, padding: "20px 24px", marginBottom: 24 }}>
-          <div style={{ fontSize: 11, color: "#f0a500", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 3, textTransform: "uppercase", marginBottom: 12 }}>Primeros pasos recomendados</div>
-          {[
-            ["1", "Ve a Ajustes y completa los datos de tu empresa (CIF, dirección, IBAN)"],
-            ["2", "Añade tus primeros clientes y proveedores"],
-            ["3", "Crea tu primer proyecto en el módulo Proyectos"],
-            ["4", "Genera tu primer presupuesto con IA describiendo la obra"],
-          ].map(([num, texto]) => (
-            <div key={num} style={{ display: "flex", gap: 12, alignItems: "flex-start", marginBottom: 10 }}>
-              <div style={{ width: 24, height: 24, borderRadius: "50%", background: "#f0a500", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, flexShrink: 0 }}>{num}</div>
-              <div style={{ fontSize: 13, color: "#475569", lineHeight: 1.6, paddingTop: 2 }}>{texto}</div>
-            </div>
-          ))}
-        </div>
-        <button onClick={() => { setOnboardingDone(true); try { localStorage.setItem("fc_onboarding","done"); } catch {} }} style={{ width: "100%", background: "#f0a500", color: "#1e293b", border: "none", padding: "16px", cursor: "pointer", fontSize: 14, letterSpacing: 2, textTransform: "uppercase", fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 8 }}>
-          ◈ Empezar a usar FactuCloud
-        </button>
-        <div style={{ textAlign: "center", marginTop: 12, fontSize: 11, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace" }}>Puedes volver a ver esta guía desde Ajustes</div>
-      </div>
-    </div>
-  );
-
-  // Panel de administrador
-  if (esAdmin && dbReady) return <PanelAdmin authToken={authToken} onLogout={() => { setLoggedIn(false); setAuthToken(null); setAuthUser(null); setEsAdmin(false); }} />;
-
-  return (
-    <div translate="no" style={{ minHeight: "100vh", background: "#f8fafc", color: "#1e293b", fontFamily: "'Plus Jakarta Sans', 'Inter', 'Segoe UI', Arial, sans-serif" }}>
-
-      {/* Sidebar oscuro elegante */}
-      <div style={{ position: "fixed", left: 0, top: 0, bottom: 0, width: 220, background: "#1e293b", borderRight: "1px solid #334155", zIndex: 100, display: "flex", flexDirection: "column" }}>
-        <div style={{ padding: "24px 20px 20px", borderBottom: "1px solid #334155" }}>
-          <div style={{ fontSize: 9, letterSpacing: 5, color: "#f0a500", textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace", marginBottom: 6 }}>Facturación Inteligente</div>
-          <div style={{ fontSize: 22, fontWeight: 300 }}>
-            <span style={{ color: "#f0a500", fontWeight: 700 }}>Factu</span><span style={{ color: "#7eb8f5" }}>Cloud</span>
-          </div>
-          <div style={{ fontSize: 9, color: "#64748b", fontFamily: "'JetBrains Mono', monospace", letterSpacing: 2, marginTop: 4 }}>v2.7 · IA Integrada</div>
-        </div>
-
-        <nav style={{ flex: 1, padding: "12px 8px", overflowY: "auto" }}>
-          {TABS.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: tab === t.id ? "rgba(240,165,0,0.15)" : "transparent", border: "none", borderLeft: tab === t.id ? "3px solid #f0a500" : "3px solid transparent", color: tab === t.id ? "#f0a500" : "#94a3b8", cursor: "pointer", fontSize: 11, letterSpacing: 1, textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace", borderRadius: "0 8px 8px 0", marginBottom: 2, textAlign: "left", transition: "all .15s" }}>
-              <span style={{ fontSize: 14 }}>{t.icon}</span>{t.label}
-              {t.id === "agente" && factAuto > 0 && <span style={{ marginLeft: "auto", background: "#f0a500", color: "#1e293b", fontSize: 9, padding: "2px 7px", borderRadius: 8, fontWeight: "bold" }}>{factAuto}</span>}
-            </button>
-          ))}
-        </nav>
-
-        <div style={{ padding: "12px", borderTop: "1px solid #334155" }}>
-          <button onClick={() => setTab("ajustes")} style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: tab === "ajustes" ? "rgba(240,165,0,0.15)" : "transparent", border: "none", borderLeft: tab === "ajustes" ? "3px solid #f0a500" : "3px solid transparent", color: tab === "ajustes" ? "#f0a500" : "#64748b", cursor: "pointer", fontSize: 11, letterSpacing: 1, textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace", borderRadius: "0 8px 8px 0", textAlign: "left", marginBottom: 6 }}>
-            <span>⚙</span>Ajustes
-          </button>
-          <button onClick={() => {
-                setLoggedIn(false); setAuthToken(null); setAuthUser(null);
-                setObrasState([]); setClientesState([]); setProveedoresState([]);
-                setFacturasState([]); setEmpleadosState([]); setPresupuestosState([]);
-                setDocumentosState([]); setMovimientosState([]); setDbReady(false);
-              }} style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", background: "transparent", border: "none", color: "#64748b", cursor: "pointer", fontSize: 10, letterSpacing: 1, textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace", textAlign: "left" }}>
-            <span>↩</span>Cerrar sesión
-          </button>
-          {dbError && <div style={{ background: "#fee2e2", borderRadius: 6, padding: "8px 12px", marginTop: 8, fontSize: 10, color: "#ef4444" }}>⚠ BD sin conectar</div>}
-        </div>
-      </div>
-
-      {/* Contenido principal claro */}
-      <div style={{ marginLeft: 220, padding: "32px 40px", minHeight: "100vh", background: "#f8fafc" }}>
-        {/* Chat de ayuda flotante */}
-        <ChatAyuda tabActual={tab} />
-
-        {tab === "dashboard" && <Dashboard obras={obras} facturas={facturas} proveedores={proveedores} clientes={clientes} setTab={setTab} />}
-        {tab === "analitica" && <Analitica facturas={facturas} obras={obras} />}
-        {tab === "tesoreria" && <Tesoreria facturas={facturas} movimientos={movimientosList} setMovimientos={setMovimientos} />}
-        {tab === "informes" && <Informes facturas={facturas} obras={obras} proveedores={proveedores} clientes={clientes} />}
-        {tab === "obras" && <Obras obras={obras} setObras={setObras} clientes={clientes} facturas={facturas} />}
-        {tab === "proveedores" && <Proveedores proveedores={proveedores} setProveedores={setProveedores} />}
-        {tab === "clientes" && <Clientes clientes={clientes} setClientes={setClientes} />}
-        {tab === "nominas" && <Nominas empleados={empleados} setEmpleados={setEmpleados} />}
-        {tab === "presupuestos" && <Presupuestos facturas={facturas} setFacturas={setFacturas} lista={presupuestosList} setLista={setPresupuestos} />}
-        {tab === "contabilidad" && <Contabilidad facturas={facturas} setFacturas={setFacturas} empresa={empresa} clientes={clientes} proveedores={proveedores} />}
-        {tab === "documentos" && <Documentos clientes={clientes} proveedores={proveedores} obras={obras} docs={documentosList} setDocs={setDocumentos} />}
-        {tab === "agente" && <Agente setFacturas={setFacturas} facturas={facturas} clientes={clientes} obras={obras} proveedores={proveedores} />}
-        {tab === "ajustes" && <Ajustes empresa={empresa} setEmpresa={emp => { setEmpresa(emp); try { localStorage.setItem("fc_empresa", JSON.stringify(emp)); } catch {} }} />}
-      </div>
-
-      <style>{`* { box-sizing: border-box; } body { font-family: 'Plus Jakarta Sans','Inter','Segoe UI',Arial,sans-serif; } ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: #f8fafc; } ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; } input,select,textarea { font-family: inherit; } @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;700&display=swap'); button { font-family: inherit; }`}</style>
-    </div>
-  );
-}
-
-// ════════════════════════════════════════
-// MÓDULO AJUSTES
-// ════════════════════════════════════════
-function Ajustes({ empresa, setEmpresa }) {
-  const [form, setForm] = useState({ ...empresa });
-  const [guardado, setGuardado] = useState(false);
-  const [logoPreview, setLogoPreview] = useState(() => {
-    try { return localStorage.getItem("fc_logo") || null; } catch { return null; }
-  });
-
-  const handleLogoUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    if (file.size > 500000) { alert("El logo no debe superar 500KB"); return; }
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const base64 = ev.target.result;
-      setLogoPreview(base64);
-      try { localStorage.setItem("fc_logo", base64); } catch {}
-      setForm(p => ({ ...p, logo: base64 }));
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const eliminarLogo = () => {
-    setLogoPreview(null);
-    try { localStorage.removeItem("fc_logo"); } catch {}
-    setForm(p => ({ ...p, logo: null }));
-  };
-  const inp = { width: "100%", background: "#ffffff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" };
-  const lbl = { fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono', monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 };
-
-  const guardar = () => {
-    setEmpresa({ ...form });
-    setGuardado(true);
-    setTimeout(() => setGuardado(false), 2500);
-  };
-
-  return (
-    <div style={{ maxWidth: 780 }}>
-      <div style={{ fontSize: 11, letterSpacing: 6, color: "#f0a500", textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace", marginBottom: 28 }}>— Ajustes de la plataforma</div>
-
-      {/* Logo generado SVG */}
-      <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 3, padding: "24px", marginBottom: 20, display: "flex", alignItems: "center", gap: 24 }}>
-        <div style={{ flexShrink: 0 }}>
-          <svg width="80" height="80" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
-            <rect width="80" height="80" rx="12" fill="#f8f9fa"/>
-            <rect x="0" y="0" width="6" height="80" rx="3" fill="#f0a500"/>
-            <text x="42" y="32" textAnchor="middle" fontFamily="Georgia,serif" fontSize="22" fontWeight="bold" fill="#1e293b">FC</text>
-            <line x1="16" y1="42" x2="68" y2="42" stroke="#f0a500" strokeWidth="1.5" opacity="0.6"/>
-            <text x="42" y="58" textAnchor="middle" fontFamily="monospace" fontSize="8" fill="#888" letterSpacing="3">FACTUCLOUD</text>
-            <circle cx="64" cy="16" r="6" fill="#f0a500" opacity="0.15"/>
-            <circle cx="64" cy="16" r="3" fill="#f0a500"/>
-          </svg>
-        </div>
         <div>
-          <div style={{ fontSize: 14, color: "#334155", marginBottom: 6 }}>Logo de FactuCloud</div>
-          <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.8 }}>Este logo aparecerá en tus facturas, presupuestos e informes. Puedes personalizarlo con el nombre de tu empresa en los datos de abajo.</div>
-        </div>
-      </div>
-
-      {/* Logo empresa */}
-      <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderTop: "2px solid #f0a500", borderRadius: 3, padding: "24px", marginBottom: 16 }}>
-        <div style={{ fontSize: 10, color: "#f0a500", letterSpacing: 4, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 20 }}>Logo de la empresa</div>
-        <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
-          {/* Preview del logo */}
-          <div style={{ width: 120, height: 80, border: "2px dashed #e2e8f0", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", background: "#f8fafc", overflow: "hidden", flexShrink: 0 }}>
-            {logoPreview
-              ? <img src={logoPreview} alt="Logo" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
-              : <div style={{ textAlign: "center", color: "#94a3b8", fontSize: 10, fontFamily: "'JetBrains Mono',monospace" }}>Sin logo</div>
-            }
-          </div>
-          <div>
-            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 12, lineHeight: 1.7 }}>
-              Sube el logo de tu empresa. Aparecerá en todas tus <strong>facturas, presupuestos y nóminas</strong>.<br/>
-              <span style={{ fontSize: 11, color: "#94a3b8" }}>Formatos: PNG, JPG, SVG — Máximo 500KB</span>
-            </div>
-            <div style={{ display: "flex", gap: 10 }}>
-              <label style={{ background: "#f0a500", color: "#1e293b", border: "none", padding: "10px 20px", cursor: "pointer", fontSize: 11, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 4, textTransform: "uppercase", display: "inline-block" }}>
-                ↑ Subir logo
-                <input type="file" accept="image/*" onChange={handleLogoUpload} style={{ display: "none" }} />
-              </label>
-              {logoPreview && (
-                <button onClick={eliminarLogo} style={{ background: "#e0525215", border: "1px solid #e0525233", color: "#e05252", padding: "10px 16px", cursor: "pointer", fontSize: 11, fontFamily: "'JetBrains Mono',monospace", borderRadius: 4, textTransform: "uppercase" }}>✕ Eliminar</button>
+          {/* Estado de conexión Gmail */}
+          <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderTop: "2px solid #f0a500", borderRadius: 3, padding: "20px 24px", marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontSize: 10, color: "#f0a500", letterSpacing: 4, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 6 }}>Agente IA — Procesador de facturas</div>
+                <div style={{ fontSize: 13, color: "#64748b" }}>Conecta tu Gmail y el agente procesará automáticamente las facturas que recibas, creando proveedores y registrando gastos.</div>
+              </div>
+              {!gmailToken ? (
+                <button onClick={conectarGmail} style={{ background: "#f0a500", color: "#1e293b", border: "none", padding: "12px 24px", cursor: "pointer", fontSize: 11, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 4, textTransform: "uppercase", whiteSpace: "nowrap" }}>
+                  📧 Conectar Gmail
+                </button>
+              ) : (
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <div style={{ fontSize: 12, color: "#4caf7d", fontFamily: "'JetBrains Mono',monospace" }}>✓ Gmail conectado</div>
+                  <button onClick={procesarFacturasGmail} disabled={procesando} style={{ background: "#4caf7d", color: "#fff", border: "none", padding: "10px 20px", cursor: procesando ? "not-allowed" : "pointer", fontSize: 10, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 4, textTransform: "uppercase" }}>
+                    {procesando ? "⟳ Procesando..." : "⟳ Procesar ahora"}
+                  </button>
+                  <button onClick={() => { setGmailToken(null); localStorage.removeItem("fc_gmail_token"); }} style={{ background: "none", border: "1px solid #e2e8f0", color: "#94a3b8", padding: "10px 14px", cursor: "pointer", fontSize: 10, fontFamily: "'JetBrains Mono',monospace", borderRadius: 4 }}>Desconectar</button>
+                </div>
               )}
             </div>
           </div>
-        </div>
-      </div>
 
-      {/* Datos empresa */}
-      <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderTop: "2px solid #f0a500", borderRadius: 3, padding: "24px", marginBottom: 16 }}>
-        <div style={{ fontSize: 10, color: "#f0a500", letterSpacing: 4, fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase", marginBottom: 20 }}>Datos de la empresa</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-          {[["nombre","Nombre / Razón social"],["cif","CIF / NIF"],["email","Email de facturación"],["tel","Teléfono"],["direccion","Dirección"],["cp","Código postal"],["ciudad","Ciudad"],["iban","IBAN para cobros"]].map(([k,label]) => (
-            <div key={k}>
-              <div style={lbl}>{label}</div>
-              <input value={form[k]||""} onChange={e => setForm(p => ({...p,[k]:e.target.value}))} style={inp} placeholder={k === "nombre" ? "Tu empresa SL" : k === "cif" ? "B12345678" : ""} />
+          {/* Log de actividad */}
+          <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 3, padding: "20px 24px", marginBottom: 16 }}>
+            <div style={{ fontSize: 10, color: "#f0a500", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 14 }}>Actividad del agente</div>
+            <div style={{ background: "#0f172a", borderRadius: 4, padding: "16px", minHeight: 120, fontFamily: "'JetBrains Mono',monospace", fontSize: 11 }}>
+              {logs.length === 0
+                ? <div style={{ color: "#475569" }}>Sin actividad — conecta Gmail para empezar</div>
+                : logs.map((l, i) => (
+                  <div key={i} style={{ color: l.tipo === "ok" ? "#4caf7d" : l.tipo === "error" ? "#e05252" : l.tipo === "ai" ? "#f0a500" : "#94a3b8", marginBottom: 4 }}>
+                    {l.tipo === "ok" ? "✓" : l.tipo === "error" ? "✕" : l.tipo === "ai" ? "🤖" : "→"} {l.msg}
+                  </div>
+                ))
+              }
             </div>
-          ))}
-        </div>
-      </div>
+          </div>
 
-      {/* Configuración facturas */}
-      <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderTop: "2px solid #7eb8f5", borderRadius: 3, padding: "24px", marginBottom: 16 }}>
-        <div style={{ fontSize: 10, color: "#7eb8f5", letterSpacing: 4, fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase", marginBottom: 20 }}>Configuración de facturas</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
-          <div>
-            <div style={lbl}>Prefijo de factura</div>
-            <input value={form.prefijoFactura||"F"} onChange={e => setForm(p => ({...p,prefijoFactura:e.target.value}))} style={inp} placeholder="F" />
-            <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "'JetBrains Mono', monospace", marginTop: 4 }}>Ej: F → F2026-001</div>
-          </div>
-          <div>
-            <div style={lbl}>Próximo número</div>
-            <input type="number" value={form.nextNumero||1} onChange={e => setForm(p => ({...p,nextNumero:parseInt(e.target.value)||1}))} style={inp} />
-            <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "'JetBrains Mono', monospace", marginTop: 4 }}>La siguiente factura será la nº {form.nextNumero||1}</div>
-          </div>
-          <div>
-            <div style={lbl}>IVA por defecto (%)</div>
-            <select value={form.tipoIVA||21} onChange={e => setForm(p => ({...p,tipoIVA:parseInt(e.target.value)}))} style={inp}>
-              <option value={21}>21% — General</option>
-              <option value={10}>10% — Reducido</option>
-              <option value={4}>4% — Superreducido</option>
-              <option value={0}>0% — Exento</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      {/* Preview factura */}
-      {form.nombre && (
-        <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 3, padding: "24px", marginBottom: 16 }}>
-          <div style={{ fontSize: 10, color: "#94a3b8", letterSpacing: 4, fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase", marginBottom: 16 }}>Vista previa — Cabecera de factura</div>
-          <div style={{ background: "#fff", padding: "20px 24px", borderRadius: 2, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-              <svg width="44" height="44" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
-                <rect width="80" height="80" rx="12" fill="#f8f9fa"/>
-                <rect x="0" y="0" width="6" height="80" rx="3" fill="#f0a500"/>
-                <text x="42" y="32" textAnchor="middle" fontFamily="Georgia,serif" fontSize="22" fontWeight="bold" fill="#1e293b">FC</text>
-                <line x1="16" y1="42" x2="68" y2="42" stroke="#f0a500" strokeWidth="1.5" opacity="0.6"/>
-                <text x="42" y="58" textAnchor="middle" fontFamily="monospace" fontSize="8" fill="#888" letterSpacing="3">FACTUCLOUD</text>
-              </svg>
-              <div>
-                <div style={{ fontSize: 16, color: "#1e293b", fontWeight: "bold" }}>{form.nombre}</div>
-                <div style={{ fontSize: 11, color: "#999" }}>{form.cif} · {form.direccion}{form.cp ? `, ${form.cp}` : ""} {form.ciudad}</div>
-                <div style={{ fontSize: 11, color: "#999" }}>{form.email} · {form.tel}</div>
+          {/* Facturas procesadas */}
+          {facturasAgente.length > 0 && (
+            <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 3, padding: "20px 24px" }}>
+              <div style={{ fontSize: 10, color: "#4caf7d", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 14 }}>
+                Facturas procesadas — {facturasAgente.length} encontradas
               </div>
+              {facturasAgente.map((f, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", borderBottom: "1px solid #f1f5f9" }}>
+                  <div>
+                    <div style={{ fontSize: 14, color: "#1e293b", marginBottom: 2 }}>{f.proveedor}</div>
+                    <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace" }}>{f.concepto} · {f.fecha}</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 16, color: "#e05252", fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold" }}>{f.total} €</div>
+                    <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 20, background: f.registrada ? "#4caf7d22" : "#f0a50022", color: f.registrada ? "#4caf7d" : "#f0a500", fontFamily: "'JetBrains Mono',monospace" }}>{f.registrada ? "✓ Registrada" : "Pendiente"}</span>
+                  </div>
+                </div>
+              ))}
             </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 18, color: "#c9a84c", fontFamily: "'JetBrains Mono', monospace" }}>{form.prefijoFactura||"F"}{new Date().getFullYear()}-{String(form.nextNumero||1).padStart(3,"0")}</div>
-              <div style={{ fontSize: 11, color: "#999" }}>{new Date().toLocaleDateString("es-ES")}</div>
-            </div>
+          )}
+
+          {/* Info */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, marginTop: 16 }}>
+            {[
+              ["📧", "Lee tu Gmail", "Busca emails con facturas PDF adjuntas de los últimos 30 días"],
+              ["🤖", "Extrae con IA", "Claude lee el PDF y extrae proveedor, CIF, importe, IVA y fecha"],
+              ["✓", "Registra solo", "Crea el proveedor si no existe y registra el gasto automáticamente"],
+            ].map(([icon, titulo, desc]) => (
+              <div key={titulo} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "16px" }}>
+                <div style={{ fontSize: 24, marginBottom: 8 }}>{icon}</div>
+                <div style={{ fontSize: 12, color: "#1e293b", fontWeight: 600, marginBottom: 4 }}>{titulo}</div>
+                <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.6 }}>{desc}</div>
+              </div>
+            ))}
           </div>
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-        <button onClick={guardar} style={{ background: "#f0a500", color: "#f8f9fa", border: "none", padding: "14px 36px", cursor: "pointer", fontSize: 11, letterSpacing: 4, fontFamily: "'JetBrains Mono', monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase" }}>✓ Guardar ajustes</button>
-        <button onClick={() => { try { localStorage.removeItem("fc_onboarding"); } catch {} window.location.reload(); }} style={{ background: "none", border: "1px solid #e2e8f0", color: "#94a3b8", padding: "14px 24px", cursor: "pointer", fontSize: 11, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>Ver guía de inicio</button>
-        {guardado && <div style={{ fontSize: 12, color: "#4caf7d", fontFamily: "'JetBrains Mono', monospace" }}>✓ Guardado correctamente</div>}
-      </div>
-    </div>
-  );
-}
-function Nominas({ empleados: empleadosProp, setEmpleados: setEmpleadosProp }) {
-  const [empleadosLocal, setEmpleadosLocal] = useState([]);
-  const empleados = empleadosProp !== undefined ? empleadosProp : empleadosLocal;
-  const setEmpleados = empleadosProp !== undefined ? setEmpleadosProp : setEmpleadosLocal;
-  const [subtab, setSubtab] = useState("empleados");
-  const [nuevo, setNuevo] = useState(false);
-  const [mesNomina, setMesNomina] = useState(new Date().getMonth());
-  const [editandoId, setEditandoId] = useState(null);
-  const [formEdit, setFormEdit] = useState({});
-  const [form, setForm] = useState({
-    nombre: "", dni: "", categoria: "", convenio: "Construcción y Obras Públicas", contrato: "Indefinido",
-    salarioBruto: "", fechaAlta: "", proyecto: "", iban: "",
-    hijos: 0, discapacidad: false, residente: true, irpfManual: ""
-  });
-
-  const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
-  const CATEGORIAS = ["Oficial 1ª","Oficial 2ª","Oficial 3ª","Peón especialista","Peón ordinario","Encargado","Director de proyecto","Administrativo"];
-  const CONTRATOS = ["Indefinido","Obra y servicio","Temporal","A tiempo parcial","Fijo discontinuo"];
-  const CONVENIOS = ["Construcción y Obras Públicas","Metal","Madera","Comercio","General de empresa"];
-
-  const calcularIRPF = (brutoAnual, hijos, discapacidad) => {
-    let minPersonal = 5550 + (hijos >= 1 ? 2400 : 0) + (hijos >= 2 ? 2700 : 0) + (hijos >= 3 ? 4000 : 0);
-    if (discapacidad) minPersonal += 3000;
-    const base = Math.max(0, brutoAnual - minPersonal);
-    let cuota = 0;
-    if (base <= 12450) cuota = base * 0.19;
-    else if (base <= 20200) cuota = 12450 * 0.19 + (base - 12450) * 0.24;
-    else if (base <= 35200) cuota = 12450 * 0.19 + 7750 * 0.24 + (base - 20200) * 0.30;
-    else if (base <= 60000) cuota = 12450 * 0.19 + 7750 * 0.24 + 15000 * 0.30 + (base - 35200) * 0.37;
-    else cuota = 12450 * 0.19 + 7750 * 0.24 + 15000 * 0.30 + 24800 * 0.37 + (base - 60000) * 0.45;
-    return Math.max(0.02, cuota / brutoAnual);
-  };
-
-  const calcularNomina = (emp) => {
-    const bruto = parseFloat(emp.salarioBruto) || 0;
-    const tipoIRPFAuto = calcularIRPF(bruto * 12, parseInt(emp.hijos || 0), emp.discapacidad);
-    const tipoIRPF = emp.irpfManual !== "" && emp.irpfManual !== undefined && emp.irpfManual !== null
-      ? parseFloat(emp.irpfManual) / 100
-      : tipoIRPFAuto;
-    const irpf = bruto * tipoIRPF;
-    const ssTrabajador = bruto * 0.0635;
-    const ssEmpresa = bruto * 0.2360;
-    const neto = bruto - irpf - ssTrabajador;
-    const costeEmpresa = bruto + ssEmpresa;
-    return { bruto, irpf, tipoIRPF, ssTrabajador, ssEmpresa, neto, costeEmpresa };
-  };
-
-  const guardarEmpleado = () => {
-    if (!form.nombre) return;
-    const emp = { ...form, id: Date.now(), salarioBruto: parseFloat(form.salarioBruto) || 0, historialSalarial: [{ fecha: form.fechaAlta || new Date().toLocaleDateString("es-ES"), salario: parseFloat(form.salarioBruto) || 0, motivo: "Alta" }] };
-    setEmpleados(prev => [...prev, emp]);
-    setNuevo(false);
-    setForm({ nombre: "", dni: "", categoria: "", convenio: "Construcción y Obras Públicas", contrato: "Indefinido", salarioBruto: "", fechaAlta: "", proyecto: "", iban: "", hijos: 0, discapacidad: false, residente: true });
-  };
-
-  const abrirEdicion = (emp) => {
-    setFormEdit({ ...emp, irpfManual: emp.irpfManual !== undefined ? emp.irpfManual : "" });
-    setEditandoId(emp.id);
-    setNuevo(false);
-    window.scrollTo(0, 0);
-  };
-
-  const guardarEdicion = () => {
-    setEmpleados(prev => prev.map(e => e.id === editandoId ? {
-      ...e, ...formEdit,
-      salarioBruto: parseFloat(formEdit.salarioBruto) || e.salarioBruto,
-      hijos: parseInt(formEdit.hijos) || 0,
-      irpfManual: formEdit.irpfManual,
-      historialSalarial: parseFloat(formEdit.salarioBruto) !== e.salarioBruto
-        ? [...(e.historialSalarial||[]), { fecha: new Date().toLocaleDateString("es-ES"), salario: parseFloat(formEdit.salarioBruto), motivo: "Actualización manual" }]
-        : e.historialSalarial
-    } : e));
-    setEditandoId(null);
-    setFormEdit({});
-  };
-
-  const exportarNominaPDF = (emp) => {
-    const n = calcularNomina(emp);
-    const mes = MESES[mesNomina];
-    const logoGuardadoN = (() => { try { return localStorage.getItem("fc_logo"); } catch { return null; } })();
-    const empresaGuardadaN = (() => { try { return JSON.parse(localStorage.getItem("fc_empresa") || "{}"); } catch { return {}; } })();
-    const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Nomina ${emp.nombre}</title>
-    <style>body{font-family:Arial,sans-serif;max-width:780px;margin:20px auto;padding:30px;color:#1e293b;font-size:13px}
-    .header{background:#f8f9fa;color:#f0a500;padding:20px;display:flex;justify-content:space-between;margin-bottom:20px}
-    .header h2{margin:0;font-size:16px;letter-spacing:2px}
-    .emp{display:grid;grid-template-columns:1fr 1fr;gap:10px;background:#f8f8f8;padding:16px;margin-bottom:16px}
-    .emp div{font-size:11px}.emp strong{font-size:13px;color:#1e293b}
-    table{width:100%;border-collapse:collapse;margin-bottom:16px}
-    th{background:#f0f0f0;padding:8px 12px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#666}
-    td{padding:10px 12px;border-bottom:1px solid #eee}
-    .total{background:#f8f9fa;color:white;padding:16px 20px;display:flex;justify-content:space-between;align-items:center}
-    .total-val{font-size:28px;color:#f0a500;font-weight:bold}
-    .footer{margin-top:30px;padding-top:16px;border-top:1px solid #eee;font-size:10px;color:#aaa;display:flex;justify-content:space-between}
-    </style></head><body>
-    <div class="header"><div style="display:flex;align-items:center;gap:16px">${logoGuardadoN ? `<img src="${logoGuardadoN}" style="height:44px;object-fit:contain"/>` : ""}<div><h2>${empresaGuardadaN.nombre||"FACTUCLOUD"}</h2><p style="margin:4px 0;font-size:11px;color:#888">${empresaGuardadaN.cif||""} · Nómina del trabajador</p></div></div>
-    <div style="text-align:right"><p style="color:#f0a500;font-size:14px;margin:0">${mes} ${new Date().getFullYear()}</p></div></div>
-    <div class="emp">
-      <div><div style="color:#888;font-size:10px">TRABAJADOR</div><strong>${emp.nombre}</strong></div>
-      <div><div style="color:#888;font-size:10px">DNI / NIE</div><strong>${emp.dni || "pendiente"}</strong></div>
-      <div><div style="color:#888;font-size:10px">CATEGORIA</div><strong>${emp.categoria}</strong></div>
-      <div><div style="color:#888;font-size:10px">CONTRATO</div><strong>${emp.contrato}</strong></div>
-      <div><div style="color:#888;font-size:10px">ALTA</div><strong>${emp.fechaAlta || "pendiente"}</strong></div>
-      <div><div style="color:#888;font-size:10px">IBAN</div><strong>${emp.iban || "pendiente"}</strong></div>
-    </div>
-    <table><thead><tr><th>Concepto</th><th style="text-align:right">Devengos</th><th style="text-align:right">Deducciones</th></tr></thead>
-    <tbody>
-      <tr><td>Salario base</td><td style="text-align:right">${n.bruto.toFixed(2)} EUR</td><td></td></tr>
-      <tr><td>IRPF (${(n.tipoIRPF * 100).toFixed(1)}%)</td><td></td><td style="text-align:right;color:#c00">${n.irpf.toFixed(2)} EUR</td></tr>
-      <tr><td>Seguridad Social trabajador (6.35%)</td><td></td><td style="text-align:right;color:#c00">${n.ssTrabajador.toFixed(2)} EUR</td></tr>
-    </tbody></table>
-    <div class="total"><div><div style="font-size:11px;color:#888;letter-spacing:2px">LIQUIDO A PERCIBIR</div>
-    <div style="font-size:10px;color:#555;margin-top:4px">Transferencia a ${emp.iban || "IBAN pendiente"}</div></div>
-    <div class="total-val">${n.neto.toFixed(2)} EUR</div></div>
-    <div style="margin-top:16px;padding:12px;background:#f8f8f8;font-size:11px;color:#666;display:flex;justify-content:space-between">
-      <span>Coste empresa: <strong>${n.costeEmpresa.toFixed(2)} EUR</strong></span>
-      <span>SS empresa (23.60%): <strong>${n.ssEmpresa.toFixed(2)} EUR</strong></span>
-    </div>
-    <div class="footer"><span>Firma trabajador: ___________________</span><span>Firma empresa: ___________________</span>
-    <span>Generado por FactuCloud - ${new Date().toLocaleDateString("es-ES")}</span></div>
-    </body></html>`;
-    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([html], { type: "text/html" }));
-    a.download = `Nomina_${emp.nombre.replace(/\s+/g,"_")}_${mes}_${new Date().getFullYear()}.html`; a.click();
-  };
-
-  const exportarGestoria = () => {
-    if (empleados.length === 0) return;
-    const mes = MESES[mesNomina];
-    const resumen = `CUADRO DE COTIZACION - ${mes.toUpperCase()} ${new Date().getFullYear()}\n${"=".repeat(70)}\n\n` +
-      empleados.map(e => {
-        const n = calcularNomina(e);
-        return `EMPLEADO: ${e.nombre}\nDNI: ${e.dni||"--"} | Categoria: ${e.categoria} | Contrato: ${e.contrato}\nIBAN: ${e.iban||"pendiente"} | Alta: ${e.fechaAlta||"--"} | Convenio: ${e.convenio||"--"}\n\nBASES:\n  Salario bruto mensual:  ${n.bruto.toFixed(2)} EUR\n\nDEDUCCIONES TRABAJADOR:\n  IRPF (${(n.tipoIRPF*100).toFixed(1)}%):          ${n.irpf.toFixed(2)} EUR\n  SS trabajador (6.35%): ${n.ssTrabajador.toFixed(2)} EUR\n  NETO A TRANSFERIR:     ${n.neto.toFixed(2)} EUR\n\nCOSTE EMPRESA:\n  SS empresa (23.60%):   ${n.ssEmpresa.toFixed(2)} EUR\n  COSTE TOTAL:           ${n.costeEmpresa.toFixed(2)} EUR\n\n${"-".repeat(50)}\n`;
-      }).join("\n") +
-      `\nRESUMEN TOTAL\n${"=".repeat(40)}\nEmpleados: ${empleados.length}\nTotal bruto: ${empleados.reduce((s,e)=>s+calcularNomina(e).bruto,0).toFixed(2)} EUR\nTotal IRPF: ${empleados.reduce((s,e)=>s+calcularNomina(e).irpf,0).toFixed(2)} EUR\nTotal SS trabajadores: ${empleados.reduce((s,e)=>s+calcularNomina(e).ssTrabajador,0).toFixed(2)} EUR\nTotal SS empresa: ${empleados.reduce((s,e)=>s+calcularNomina(e).ssEmpresa,0).toFixed(2)} EUR\nTotal neto a pagar: ${empleados.reduce((s,e)=>s+calcularNomina(e).neto,0).toFixed(2)} EUR\nCoste total empresa: ${empleados.reduce((s,e)=>s+calcularNomina(e).costeEmpresa,0).toFixed(2)} EUR\n\nGenerado por FactuCloud - ${new Date().toLocaleString("es-ES")}`;
-    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([resumen], { type: "text/plain;charset=utf-8" }));
-    a.download = `Cuadro_Cotizacion_${mes}_${new Date().getFullYear()}.txt`; a.click();
-  };
-
-  const formatEURLocal = (n) => new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" }).format(n || 0);
-  const totalNominas = empleados.reduce((s, e) => s + calcularNomina(e).costeEmpresa, 0);
-  const totalNeto = empleados.reduce((s, e) => s + calcularNomina(e).neto, 0);
-  const totalSS = empleados.reduce((s, e) => s + calcularNomina(e).ssEmpresa, 0);
-  const inputStyle = { width: "100%", background: "#ffffff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" };
-  const labelStyle = { fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono', monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 };
-
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-        <div style={{ fontSize: 11, letterSpacing: 6, color: "#f0a500", textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace" }}>— Nominas y RRHH</div>
-        <div style={{ display: "flex", gap: 8 }}>
-          {empleados.length > 0 && <button onClick={exportarGestoria} style={{ background: "#e2e8f0", color: "#a78bfa", border: "1px solid #a78bfa33", padding: "10px 18px", cursor: "pointer", fontSize: 10, letterSpacing: 2, textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace", borderRadius: 2 }}>Exportar gestoria</button>}
-          {subtab === "empleados" && <button onClick={() => setNuevo(true)} style={{ background: "#f0a500", color: "#f8f9fa", border: "none", padding: "10px 24px", cursor: "pointer", fontSize: 11, letterSpacing: 3, textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace", fontWeight: "bold", borderRadius: 2 }}>+ Nuevo empleado</button>}
-        </div>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 24 }}>
-        {[["Coste total empresa", formatEURLocal(totalNominas), "#e05252"], ["Total neto empleados", formatEURLocal(totalNeto), "#4caf7d"], ["SS empresa", formatEURLocal(totalSS), "#7eb8f5"], ["Empleados", empleados.length, "#f0a500"]].map(([l, v, c]) => (
-          <div key={l} style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderTop: `2px solid ${c}`, padding: "16px 18px", borderRadius: 3 }}>
-            <div style={{ fontSize: 9, color: "#64748b", letterSpacing: 3, fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase", marginBottom: 8 }}>{l}</div>
-            <div style={{ fontSize: 20, color: c, fontWeight: 300 }}>{v}</div>
-          </div>
-        ))}
-      </div>
-
-      <div style={{ display: "flex", gap: 0, borderBottom: "1px solid #e2e8f0", marginBottom: 22 }}>
-        {[["empleados","Empleados"],["nominas","Nominas"],["cotizacion","Cotizacion SS"],["modelo111","Modelo 111"],["modelo190","Modelo 190"]].map(([id, label]) => (
-          <button key={id} onClick={() => setSubtab(id)} style={{ background: "none", border: "none", color: subtab === id ? "#f0a500" : "#555", padding: "12px 18px", cursor: "pointer", fontSize: 10, letterSpacing: 2, textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace", borderBottom: subtab === id ? "2px solid #f0a500" : "2px solid transparent", whiteSpace: "nowrap" }}>{label}</button>
-        ))}
-      </div>
 
       {subtab === "empleados" && (
         <div>
