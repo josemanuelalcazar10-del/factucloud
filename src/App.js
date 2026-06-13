@@ -5300,3 +5300,93 @@ Responde de forma muy concisa y práctica, máximo 3-4 líneas. Usa un tono amig
     </>
   );
 }
+
+// ════════════════════════════════════════
+// APP ROOT
+// ════════════════════════════════════════
+export default function App() {
+  const [authToken, setAuthToken] = useState(() => { try { return localStorage.getItem("fc_auth_token"); } catch { return null; } });
+  const [user, setUser] = useState(() => { try { const u = localStorage.getItem("fc_user"); return u ? JSON.parse(u) : null; } catch { return null; } });
+  const [tab, setTab] = useState("dashboard");
+
+  const [obras, setObras] = useState(OBRAS_INIT);
+  const [facturas, setFacturas] = useState(FACTURAS_INIT);
+  const [clientes, setClientes] = useState(CLIENTES_INIT);
+  const [proveedores, setProveedores] = useState(PROVEEDORES_INIT);
+  const [docs, setDocs] = useState([]);
+  const [movimientos, setMovimientos] = useState([]);
+  const [lista, setLista] = useState([]);
+
+  const handleLogin = (token, userData) => {
+    setAuthToken(token);
+    setUser(userData);
+    try { localStorage.setItem("fc_auth_token", token); localStorage.setItem("fc_user", JSON.stringify(userData)); } catch {}
+  };
+
+  const handleLogout = () => {
+    setAuthToken(null); setUser(null);
+    try { localStorage.removeItem("fc_auth_token"); localStorage.removeItem("fc_user"); localStorage.removeItem("fc_gmail_token"); } catch {}
+  };
+
+  if (!authToken) return <Login onLogin={handleLogin} />;
+  if (user?.email === ADMIN_EMAIL) return <PanelAdmin authToken={authToken} onLogout={handleLogout} />;
+
+  const TABS = [
+    { id: "dashboard", label: "Dashboard", icon: "◈" },
+    { id: "obras", label: "Proyectos", icon: "🏗" },
+    { id: "clientes", label: "Clientes", icon: "👥" },
+    { id: "proveedores", label: "Proveedores", icon: "🏭" },
+    { id: "presupuestos", label: "Presupuestos", icon: "📋" },
+    { id: "contabilidad", label: "Contabilidad", icon: "📊" },
+    { id: "nominas", label: "Nóminas", icon: "💼" },
+    { id: "tesoreria", label: "Tesorería", icon: "🏦" },
+    { id: "documentos", label: "Documentos", icon: "📁" },
+    { id: "agente", label: "Agente IA", icon: "🤖" },
+    { id: "informes", label: "Informes IA", icon: "📈" },
+    { id: "analitica", label: "Analítica", icon: "📉" },
+  ];
+
+  return (
+    <div translate="no" style={{ display: "flex", minHeight: "100vh", fontFamily: "'Plus Jakarta Sans','Inter','Segoe UI',Arial,sans-serif", background: "#f1f5f9" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;700&display=swap'); * { box-sizing: border-box; } ::-webkit-scrollbar{width:4px} ::-webkit-scrollbar-track{background:#f1f5f9} ::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:2px}`}</style>
+      {/* Sidebar */}
+      <div style={{ width: 220, background: "#1e293b", display: "flex", flexDirection: "column", position: "fixed", top: 0, left: 0, bottom: 0, zIndex: 100 }}>
+        <div style={{ padding: "28px 20px 20px" }}>
+          <div style={{ fontSize: 8, letterSpacing: 5, color: "#f0a500", textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace", marginBottom: 6 }}>Facturación Inteligente</div>
+          <div style={{ fontSize: 22, fontWeight: 300 }}>
+            <span style={{ color: "#f0a500", fontWeight: 700 }}>Factu</span><span style={{ color: "#fff" }}>Cloud</span>
+          </div>
+          <div style={{ fontSize: 9, color: "#475569", fontFamily: "'JetBrains Mono', monospace", letterSpacing: 2, marginTop: 4 }}>v2.7 · IA Integrada</div>
+        </div>
+        <nav style={{ flex: 1, padding: "8px 0", overflowY: "auto" }}>
+          {TABS.map(t => (
+            <div key={t.id} onClick={() => setTab(t.id)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 20px", cursor: "pointer", background: tab === t.id ? "rgba(240,165,0,0.12)" : "transparent", borderLeft: tab === t.id ? "2px solid #f0a500" : "2px solid transparent", color: tab === t.id ? "#f0a500" : "#94a3b8", fontSize: 12, fontWeight: tab === t.id ? 600 : 400, transition: "all .15s" }}>
+              <span style={{ fontSize: 14 }}>{t.icon}</span>
+              <span>{t.label}</span>
+            </div>
+          ))}
+        </nav>
+        <div style={{ padding: "16px 20px", borderTop: "1px solid #334155" }}>
+          <div style={{ fontSize: 10, color: "#475569", fontFamily: "'JetBrains Mono', monospace", marginBottom: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user?.email || ""}</div>
+          <button onClick={handleLogout} style={{ width: "100%", background: "transparent", border: "1px solid #334155", color: "#64748b", padding: "8px", cursor: "pointer", fontSize: 10, letterSpacing: 2, fontFamily: "'JetBrains Mono', monospace", borderRadius: 4, textTransform: "uppercase" }}>Cerrar sesión</button>
+        </div>
+      </div>
+      {/* Main */}
+      <div style={{ marginLeft: 220, flex: 1, padding: "32px 32px", minHeight: "100vh" }}>
+        {tab === "dashboard" && <Dashboard obras={obras} facturas={facturas} proveedores={proveedores} clientes={clientes} setTab={setTab} />}
+        {tab === "obras" && <Obras obras={obras} setObras={setObras} clientes={clientes} facturas={facturas} />}
+        {tab === "clientes" && <Clientes clientes={clientes} setClientes={setClientes} />}
+        {tab === "proveedores" && <Proveedores proveedores={proveedores} setProveedores={setProveedores} />}
+        {tab === "presupuestos" && <Presupuestos facturas={facturas} setFacturas={setFacturas} lista={lista} setLista={setLista} />}
+        {tab === "contabilidad" && <Contabilidad facturas={facturas} setFacturas={setFacturas} clientes={clientes} proveedores={proveedores} />}
+        {tab === "nominas" && <Agente setFacturas={setFacturas} facturas={facturas} clientes={clientes} obras={obras} proveedores={proveedores} setClientes={setClientes} setProveedores={setProveedores} />}
+        {tab === "tesoreria" && <Tesoreria facturas={facturas} movimientos={movimientos} setMovimientos={setMovimientos} />}
+        {tab === "documentos" && <Documentos clientes={clientes} proveedores={proveedores} obras={obras} docs={docs} setDocs={setDocs} />}
+        {tab === "agente" && <Agente setFacturas={setFacturas} facturas={facturas} clientes={clientes} obras={obras} proveedores={proveedores} setClientes={setClientes} setProveedores={setProveedores} />}
+        {tab === "informes" && <Informes facturas={facturas} obras={obras} proveedores={proveedores} clientes={clientes} />}
+        {tab === "analitica" && <Analitica facturas={facturas} obras={obras} />}
+      </div>
+      <ChatAyuda tabActual={tab} />
+    </div>
+  );
+}
