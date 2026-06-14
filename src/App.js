@@ -7,6 +7,32 @@ import { useState, useRef, useCallback, useEffect } from "react";
 const SUPABASE_URL = "https://mlsvbmqpzgxlvghqsmpm.supabase.co"; // v3.0
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1sc3ZibXFwemd4bHZnaHFzbXBtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAyMTg0NjAsImV4cCI6MjA5NTc5NDQ2MH0.htxKoUmhQ3Mhj6hdLZTpyDIjMjDvqLSZ15uxsI-Wm54";
 
+// Helper Supabase REST
+const sb = {
+  headers: (token) => ({
+    "Content-Type": "application/json",
+    "apikey": SUPABASE_KEY,
+    "Authorization": `Bearer ${token || SUPABASE_KEY}`,
+    "Prefer": "return=representation"
+  }),
+  get: async (table, token, filter = "") => {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${filter}&order=id.desc`, { headers: sb.headers(token) });
+    return res.ok ? res.json() : [];
+  },
+  insert: async (table, token, data) => {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, { method: "POST", headers: sb.headers(token), body: JSON.stringify(data) });
+    return res.ok ? res.json() : null;
+  },
+  update: async (table, token, id, data) => {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`, { method: "PATCH", headers: sb.headers(token), body: JSON.stringify(data) });
+    return res.ok;
+  },
+  delete: async (table, token, id) => {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`, { method: "DELETE", headers: sb.headers(token) });
+    return res.ok;
+  }
+};
+
 
 
 
@@ -243,7 +269,7 @@ function Dashboard({ obras, facturas, proveedores, clientes, setTab }) {
 // ════════════════════════════════════════
 // OBRAS
 // ════════════════════════════════════════
-function Obras({ obras, setObras, clientes: clientesProp, facturas }) {
+function Obras({ obras, setObras, clientes: clientesProp, facturas, token }) {
   const [sel, setSel] = useState(null);
   const [subtab, setSubtab] = useState("lista");
   const [nuevo, setNuevo] = useState(false);
@@ -268,18 +294,19 @@ function Obras({ obras, setObras, clientes: clientesProp, facturas }) {
   const inp = { width: "100%", background: "#ffffff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" };
   const lbl = { fontSize: 10, color: "#64748b", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2, textTransform: "uppercase", marginBottom: 6 };
 
-  const guardar = () => {
+  const guardar = async () => {
     if (!form.nombre) return;
-    setObras(prev => [...prev, {
-      ...form, id: Date.now(), progreso: 0, certificado: 0, incidencias: 0,
-      color: "#f0a500", presupuesto: parseFloat(form.presupuesto) || 0,
-      certificaciones: [], fases: [], incidenciasList: [], costes: []
-    }]);
+    const data = { nombre: form.nombre, cliente: form.cliente||"", estado: form.estado||"Pendiente inicio", presupuesto: parseFloat(form.presupuesto)||0, inicio: form.inicio||"", fin: form.fin||"", progreso: 0, color: "#f0a500" };
+    const res = await sb.insert("obras", token, data);
+    const nueva = res?.[0] || { ...data, id: Date.now(), certificaciones: [], fases: [], incidenciasList: [], costes: [] };
+    setObras(prev => [{ ...form, ...nueva, certificaciones: [], fases: [], incidenciasList: [], costes: [] }, ...prev]);
     setNuevo(false);
     setForm({ nombre: "", codigo: "", tipo: "Edificacion", cliente: "", responsable: "", direccion: "", municipio: "", provincia: "", inicio: "", fin: "", presupuesto: "", margenObj: 20, estado: "Pendiente inicio", descripcion: "", arquitecto: "" });
   };
 
-  const guardarEdicion = () => {
+  const guardarEdicion = async () => {
+    const data = { nombre: formEdit.nombre, cliente: formEdit.cliente, estado: formEdit.estado, presupuesto: parseFloat(formEdit.presupuesto)||0, inicio: formEdit.inicio, fin: formEdit.fin };
+    await sb.update("obras", token, sel, data);
     setObras(prev => prev.map(o => o.id === sel ? { ...o, ...formEdit, presupuesto: parseFloat(formEdit.presupuesto)||o.presupuesto } : o));
     setEditando(false);
   };
@@ -451,7 +478,7 @@ function Obras({ obras, setObras, clientes: clientesProp, facturas }) {
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
                   <button onClick={() => { setFormEdit({...obra}); setEditando(true); setSubtab("resumen"); }} style={{ background: "#f0a50015", border: "1px solid #f0a50033", color: "#f0a500", padding: "8px 16px", cursor: "pointer", fontSize: 10, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>✎ Editar</button>
-                  <button onClick={() => { setObras(prev => prev.filter(o => o.id !== sel)); setSel(null); }} style={{ background: "#e0525215", border: "1px solid #e0525233", color: "#e05252", padding: "8px 16px", cursor: "pointer", fontSize: 10, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>✕ Eliminar</button>
+                  <button onClick={async () => { await sb.delete("obras", token, sel); setObras(prev => prev.filter(o => o.id !== sel)); setSel(null); }} style={{ background: "#e0525215", border: "1px solid #e0525233", color: "#e05252", padding: "8px 16px", cursor: "pointer", fontSize: 10, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>✕ Eliminar</button>
                 </div>
               </div>
 
@@ -730,23 +757,32 @@ function Obras({ obras, setObras, clientes: clientesProp, facturas }) {
 // ════════════════════════════════════════
 // PROVEEDORES
 // ════════════════════════════════════════
-function Proveedores({ proveedores, setProveedores }) {
+function Proveedores({ proveedores, setProveedores, token }) {
   const [sel, setSel] = useState(null);
   const [nuevo, setNuevo] = useState(false);
   const [editando, setEditando] = useState(false);
-  const [form, setForm] = useState({ nombre: "", cif: "", contacto: "", email: "", tel: "", categoria: "", tipo: "Proveedor", condicionesPago: "30 días", numeroCuenta: "", direccion: "", cp: "", ciudad: "" });
+  const [form, setForm] = useState({ nombre: "", cif: "", contacto: "", email: "", tel: "", categoria: "", tipo: "Proveedor", condicionespago: "30 días", numerocuenta: "", direccion: "", cp: "", ciudad: "" });
   const [formEdit, setFormEdit] = useState({});
   const prov = proveedores.find(p => p.id === sel);
 
-  const guardar = () => {
+  const guardar = async () => {
     if (!form.nombre) return;
-    setProveedores(prev => [...prev, { ...form, id: Date.now(), facturado: 0, pendiente: 0 }]);
-    setNuevo(false); setForm({ nombre: "", cif: "", contacto: "", email: "", tel: "", categoria: "", tipo: "Proveedor", condicionesPago: "30 días", numeroCuenta: "", direccion: "", cp: "", ciudad: "" });
+    const data = { ...form, facturado: 0, pendiente: 0 };
+    const res = await sb.insert("proveedores", token, data);
+    setProveedores(prev => [res?.[0] || { ...data, id: Date.now() }, ...prev]);
+    setNuevo(false); setForm({ nombre: "", cif: "", contacto: "", email: "", tel: "", categoria: "", tipo: "Proveedor", condicionespago: "30 días", numerocuenta: "", direccion: "", cp: "", ciudad: "" });
   };
 
-  const guardarEdicion = () => {
+  const guardarEdicion = async () => {
+    await sb.update("proveedores", token, sel, formEdit);
     setProveedores(prev => prev.map(p => p.id === sel ? { ...p, ...formEdit } : p));
     setEditando(false);
+  };
+
+  const eliminarProveedor = async (id) => {
+    await sb.delete("proveedores", token, id);
+    setProveedores(prev => prev.filter(p => p.id !== id));
+    setSel(null);
   };
 
   return (
@@ -830,7 +866,7 @@ function Proveedores({ proveedores, setProveedores }) {
                     <div style={{ display: "flex", gap: 10 }}>
                       <button onClick={() => setSel(null)} style={{ background: "none", border: "1px solid #e2e8f0", color: "#94a3b8", padding: "10px 20px", fontSize: 10, letterSpacing: 3, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer", borderRadius: 2, textTransform: "uppercase" }}>← Volver</button>
                       <button onClick={() => { setFormEdit({...prov}); setEditando(true); }} style={{ background: "#f0a50015", border: "1px solid #f0a50033", color: "#f0a500", padding: "10px 20px", fontSize: 10, letterSpacing: 3, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer", borderRadius: 2, textTransform: "uppercase" }}>✎ Editar</button>
-                      <button onClick={() => { setProveedores(prev => prev.filter(p => p.id !== prov.id)); setSel(null); }} style={{ background: "#e0525215", border: "1px solid #e0525233", color: "#e05252", padding: "10px 20px", fontSize: 10, letterSpacing: 3, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer", borderRadius: 2, textTransform: "uppercase" }}>✕ Eliminar</button>
+                      <button onClick={() => eliminarProveedor(prov.id)} style={{ background: "#e0525215", border: "1px solid #e0525233", color: "#e05252", padding: "10px 20px", fontSize: 10, letterSpacing: 3, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer", borderRadius: 2, textTransform: "uppercase" }}>✕ Eliminar</button>
                     </div>
                   </>
                 )}
@@ -845,7 +881,7 @@ function Proveedores({ proveedores, setProveedores }) {
 // ════════════════════════════════════════
 // CLIENTES
 // ════════════════════════════════════════
-function Clientes({ clientes, setClientes }) {
+function Clientes({ clientes, setClientes, token }) {
   const [sel, setSel] = useState(null);
   const [nuevo, setNuevo] = useState(false);
   const [editando, setEditando] = useState(false);
@@ -853,15 +889,24 @@ function Clientes({ clientes, setClientes }) {
   const [formEdit, setFormEdit] = useState({});
   const cl = clientes.find(c => c.id === sel);
 
-  const guardar = () => {
+  const guardar = async () => {
     if (!form.nombre) return;
-    setClientes(prev => [...prev, { ...form, id: Date.now(), facturado: 0, pendiente: 0 }]);
+    const data = { ...form, facturado: 0, pendiente: 0 };
+    const res = await sb.insert("clientes", token, data);
+    setClientes(prev => [res?.[0] || { ...data, id: Date.now() }, ...prev]);
     setNuevo(false); setForm({ nombre: "", cif: "", contacto: "", email: "", tel: "", tipo: "Promotor", direccion: "", cp: "", ciudad: "" });
   };
 
-  const guardarEdicion = () => {
+  const guardarEdicion = async () => {
+    await sb.update("clientes", token, sel, formEdit);
     setClientes(prev => prev.map(c => c.id === sel ? { ...c, ...formEdit } : c));
     setEditando(false);
+  };
+
+  const eliminarCliente = async (id) => {
+    await sb.delete("clientes", token, id);
+    setClientes(prev => prev.filter(c => c.id !== id));
+    setSel(null);
   };
 
   return (
@@ -940,7 +985,7 @@ function Clientes({ clientes, setClientes }) {
                     <div style={{ display: "flex", gap: 10 }}>
                       <button onClick={() => setSel(null)} style={{ background: "none", border: "1px solid #e2e8f0", color: "#94a3b8", padding: "10px 20px", fontSize: 10, letterSpacing: 3, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer", borderRadius: 2, textTransform: "uppercase" }}>← Volver</button>
                       <button onClick={() => { setFormEdit({...cl}); setEditando(true); }} style={{ background: "#f0a50015", border: "1px solid #f0a50033", color: "#f0a500", padding: "10px 20px", fontSize: 10, letterSpacing: 3, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer", borderRadius: 2, textTransform: "uppercase" }}>✎ Editar</button>
-                      <button onClick={() => { setClientes(prev => prev.filter(c => c.id !== cl.id)); setSel(null); }} style={{ background: "#e0525215", border: "1px solid #e0525233", color: "#e05252", padding: "10px 20px", fontSize: 10, letterSpacing: 3, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer", borderRadius: 2, textTransform: "uppercase" }}>✕ Eliminar</button>
+                      <button onClick={() => eliminarCliente(cl.id)} style={{ background: "#e0525215", border: "1px solid #e0525233", color: "#e05252", padding: "10px 20px", fontSize: 10, letterSpacing: 3, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer", borderRadius: 2, textTransform: "uppercase" }}>✕ Eliminar</button>
                     </div>
                   </>
                 )}
@@ -975,7 +1020,7 @@ Devuelve SOLO JSON valido sin texto adicional:
 }
 Usa precios de mercado espanoles actuales. Se detallado y profesional.`;
 
-function Presupuestos({ facturas, setFacturas, lista: listaProp, setLista: setListaProp }) {
+function Presupuestos({ facturas, setFacturas, lista: listaProp, setLista: setListaProp, token }) {
   const [input, setInput] = useState("");
   const [presupuesto, setPresupuesto] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -1029,7 +1074,9 @@ function Presupuestos({ facturas, setFacturas, lista: listaProp, setLista: setLi
   const guardar = (estado = "Borrador") => {
     if (!presupuesto) return;
     const nuevo = { ...presupuesto, id: Date.now(), totalMat, totalSub, total: totalPresup, estado, margen, fases: fasesParciales, creadoEn: new Date().toLocaleDateString("es-ES"), validezDias };
-    setLista(prev => [nuevo, ...prev]);
+    const dataPres = { titulo: nuevo.titulo||"Presupuesto", obra: nuevo.obra||"", cliente: nuevo.cliente||"", fecha: nuevo.fecha||new Date().toLocaleDateString("es-ES"), validez: nuevo.validez||"30 días" };
+    const resPres = await sb.insert("presupuestos", token, dataPres);
+    setLista(prev => [resPres?.[0] ? {...nuevo, ...resPres[0]} : nuevo, ...prev]);
     setPresupuesto(null); setInput(""); setTab("lista");
   };
 
@@ -1057,6 +1104,7 @@ function Presupuestos({ facturas, setFacturas, lista: listaProp, setLista: setLi
       auto: false,
       origen: "presupuesto"
     };
+    if (onSave) onSave(nuevaFactura);
     setFacturas(prev => [nuevaFactura, ...prev]);
     setLista(prev => prev.map(p => p.id === pres.id ? { ...p, estado: "Facturado" } : p));
     setSelDetalle(null);
@@ -1368,7 +1416,7 @@ const FACTURA_PROMPT = `Eres contable de una empresa de construcción española.
 Devuelve SOLO JSON válido sin texto adicional:
 {"numeroFactura":"F2026-001","fecha":"28/05/2026","fechaVencimiento":"27/06/2026","cliente":{"nombre":"","cif":"","direccion":"","email":""},"obra":"","lineas":[{"descripcion":"","cantidad":1,"unidad":"ud","precioUnitario":0,"importe":0}],"tipoIVA":21,"tipoIRPF":15,"formaPago":"Transferencia bancaria","notas":"","sugerencias":[]}`;
 
-function Contabilidad({ facturas, setFacturas, empresa: empProp, clientes: clientesProp, proveedores: proveedoresProp }) {
+function Contabilidad({ facturas, setFacturas, empresa: empProp, clientes: clientesProp, proveedores: proveedoresProp, token, onSave }) {
   const [subtab, setSubtab] = useState("lista");
   const [input, setInput] = useState("");
   const [factura, setFactura] = useState(null);
@@ -1436,6 +1484,7 @@ function Contabilidad({ facturas, setFacturas, empresa: empProp, clientes: clien
       notas: formFactura.notas,
       estado, tipo: "ingreso", auto: false, manual: true
     };
+    if (onSave) onSave(nueva);
     setFacturas(prev => [nueva, ...prev]);
     setFormFactura({ cliente: "", clienteManual: "", cif: "", direccion: "", concepto: "", fecha: new Date().toLocaleDateString("es-ES"), fechaVencimiento: "", formaPago: "Transferencia bancaria", lineas: [{ descripcion: "", cantidad: 1, unidad: "ud", precioUnitario: 0 }], tipoIVA: 21, tipoIRPF: 0, notas: "" });
     setSubtab("lista");
@@ -1461,6 +1510,7 @@ function Contabilidad({ facturas, setFacturas, empresa: empProp, clientes: clien
       notas: formGasto.notas,
       estado: "Pendiente", tipo: "gasto", auto: false, manual: true
     };
+    if (onSave) onSave(nuevo);
     setFacturas(prev => [nuevo, ...prev]);
     setFormGasto({ proveedor: "", proveedorManual: "", cif: "", concepto: "", fecha: new Date().toLocaleDateString("es-ES"), fechaVencimiento: "", categoria: "Materiales", base: "", iva: 21, total: "", notas: "" });
     setSubtab("lista");
@@ -1654,10 +1704,10 @@ function Contabilidad({ facturas, setFacturas, empresa: empProp, clientes: clien
                         {bloqueada ? (
                           <div style={{ display: "flex", gap: 4 }}>
                           {f.estado === "Emitida" && f.tipo === "ingreso" && (
-                            <button onClick={() => setFacturas(prev => prev.map(x => x.id === f.id ? {...x, estado: "Cobrada"} : x))} style={{ background: "#4caf7d15", border: "1px solid #4caf7d33", color: "#4caf7d", padding: "5px 10px", cursor: "pointer", fontSize: 9, letterSpacing: 1, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase", whiteSpace: "nowrap" }}>✓ Cobrada</button>
+                            <button onClick={async () => { await sb.update("facturas", token, f.id, {estado:"Cobrada"}); setFacturas(prev => prev.map(x => x.id === f.id ? {...x, estado: "Cobrada"} : x)); }} style={{ background: "#4caf7d15", border: "1px solid #4caf7d33", color: "#4caf7d", padding: "5px 10px", cursor: "pointer", fontSize: 9, letterSpacing: 1, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase", whiteSpace: "nowrap" }}>✓ Cobrada</button>
                           )}
                           {f.estado === "Emitida" && f.tipo === "gasto" && (
-                            <button onClick={() => setFacturas(prev => prev.map(x => x.id === f.id ? {...x, estado: "Pagada"} : x))} style={{ background: "#7eb8f515", border: "1px solid #7eb8f533", color: "#7eb8f5", padding: "5px 10px", cursor: "pointer", fontSize: 9, letterSpacing: 1, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase", whiteSpace: "nowrap" }}>✓ Pagada</button>
+                            <button onClick={async () => { await sb.update("facturas", token, f.id, {estado:"Pagada"}); setFacturas(prev => prev.map(x => x.id === f.id ? {...x, estado: "Pagada"} : x)); }} style={{ background: "#7eb8f515", border: "1px solid #7eb8f533", color: "#7eb8f5", padding: "5px 10px", cursor: "pointer", fontSize: 9, letterSpacing: 1, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase", whiteSpace: "nowrap" }}>✓ Pagada</button>
                           )}
                           <button onClick={() => {
                             const rect = { id: Date.now(), numero: `R-${f.numero||f.numeroFactura}`, numeroFactura: `R-${f.numero||f.numeroFactura}`, cliente: f.cliente, concepto: `RECTIFICATIVA de ${f.numero||f.numeroFactura}`, base: -(f.base||0), iva: -(f.iva||0), irpf: 0, total: -(f.total||0), fecha: new Date().toLocaleDateString("es-ES"), estado: "Emitida", tipo: f.tipo, auto: false, rectificativa: true };
@@ -1677,10 +1727,10 @@ function Contabilidad({ facturas, setFacturas, empresa: empProp, clientes: clien
                             <button onClick={() => setFacturas(prev => prev.map(x => x.id === f.id ? { ...x, estado: "Emitida" } : x))} style={{ background: "#4caf7d", color: "#f8f9fa", border: "none", padding: "5px 10px", cursor: "pointer", fontSize: 9, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase", whiteSpace: "nowrap" }}>
                               Emitir
                             </button>
-                            <button onClick={() => setFacturas(prev => prev.filter(x => x.id !== f.id))} style={{ background: "#e0525215", border: "1px solid #e0525233", color: "#e05252", padding: "5px 8px", cursor: "pointer", fontSize: 9, fontFamily: "'JetBrains Mono', monospace", borderRadius: 2, textTransform: "uppercase" }}>✕</button>
+                            <button onClick={async () => { await sb.delete("facturas", token, f.id); setFacturas(prev => prev.filter(x => x.id !== f.id)); }} style={{ background: "#e0525215", border: "1px solid #e0525233", color: "#e05252", padding: "5px 8px", cursor: "pointer", fontSize: 9, fontFamily: "'JetBrains Mono', monospace", borderRadius: 2, textTransform: "uppercase" }}>✕</button>
                           </div>
                         ) : (
-                          <button onClick={() => setFacturas(prev => prev.filter(x => x.id !== f.id))} style={{ background: "#e0525215", border: "1px solid #e0525233", color: "#e05252", padding: "5px 10px", cursor: "pointer", fontSize: 9, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace", borderRadius: 2, textTransform: "uppercase" }}>
+                          <button onClick={async () => { await sb.delete("facturas", token, f.id); setFacturas(prev => prev.filter(x => x.id !== f.id)); }} style={{ background: "#e0525215", border: "1px solid #e0525233", color: "#e05252", padding: "5px 10px", cursor: "pointer", fontSize: 9, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace", borderRadius: 2, textTransform: "uppercase" }}>
                             Eliminar
                           </button>
                         )}
@@ -2341,10 +2391,10 @@ const CORREOS = [
   { id:3, t:9000, de:"facturas@cimentaciones-sur.com", asunto:"Certificacion obra Nave Industrial — Mayo", txt:"Certificacion nro 3 trabajos cimentacion Nave Industrial Poligono Norte. Pilotaje y encepados ejecutados segun proyecto. Base: 18.500€. IVA 21%: 3.885€. Total: 22.385€." },
 ];
 
-function Agente({ setFacturas, facturas, clientes, obras, proveedores, setClientes, setProveedores }) {
+function Agente({ setFacturas, facturas, clientes, obras, proveedores, setClientes, setProveedores, initialSubtab = "chat", token, onSave }) {
   const GMAIL_CLIENT_ID = "473799407537-jscp80uoumlhfra3blgn6lp9npqk3acl.apps.googleusercontent.com";
   const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
-  const [subtab, setSubtab] = useState("chat");
+  const [subtab, setSubtab] = useState(initialSubtab);
   const [gmailToken, setGmailToken] = useState(() => { try { return localStorage.getItem("fc_gmail_token"); } catch { return null; } });
   const [procesando, setProcesando] = useState(false);
   const [logs, setLogs] = useState([]);
@@ -2524,8 +2574,20 @@ function Agente({ setFacturas, facturas, clientes, obras, proveedores, setClient
   const totalNominas = empleados.reduce((s, e) => { const n = calcularNomina(e); return s + n.bruto + n.ssEmpresa; }, 0);
 
   const abrirEdicion = (e) => { setEditandoId(e.id); setFormEdit({ ...e }); };
-  const guardarEdicion = () => { setEmpleados(prev => prev.map(e => e.id === editandoId ? { ...e, ...formEdit } : e)); setEditandoId(null); setFormEdit({}); };
-  const guardarEmpleado = () => { if (!form.nombre) return; setEmpleados(prev => [...prev, { ...form, id: Date.now() }]); setForm({ nombre: "", dni: "", fechaAlta: "", salarioBruto: "", proyecto: "", iban: "", categoria: "", contrato: "Indefinido", convenio: "Construcción y obras públicas", hijos: 0, casado: false, discapacidad: false, irpfManual: "" }); setNuevo(false); };
+  const guardarEdicion = async () => {
+    const data = { nombre: formEdit.nombre, dni: formEdit.dni, salariobruto: parseFloat(formEdit.salarioBruto)||0, categoria: formEdit.categoria, contrato: formEdit.contrato, convenio: formEdit.convenio, hijos: parseInt(formEdit.hijos)||0, discapacidad: !!formEdit.discapacidad };
+    await sb.update("nominas", token, editandoId, data);
+    setEmpleados(prev => prev.map(e => e.id === editandoId ? { ...e, ...formEdit } : e));
+    setEditandoId(null); setFormEdit({});
+  };
+  const guardarEmpleado = async () => {
+    if (!form.nombre) return;
+    const data = { nombre: form.nombre, dni: form.dni, fechaalta: form.fechaAlta, salariobruto: parseFloat(form.salarioBruto)||0, proyecto: form.proyecto, iban: form.iban, categoria: form.categoria, contrato: form.contrato, convenio: form.convenio, hijos: parseInt(form.hijos)||0, discapacidad: !!form.discapacidad, residente: true };
+    const res = await sb.insert("nominas", token, data);
+    setEmpleados(prev => [...prev, res?.[0] || { ...form, id: Date.now() }]);
+    setForm({ nombre: "", dni: "", fechaAlta: "", salarioBruto: "", proyecto: "", iban: "", categoria: "", contrato: "Indefinido", convenio: "Construcción y obras públicas", hijos: 0, casado: false, discapacidad: false, irpfManual: "" });
+    setNuevo(false);
+  };
 
   const exportarGestoria = () => {
     const mes = MESES[mesNomina];
@@ -2542,6 +2604,12 @@ function Agente({ setFacturas, facturas, clientes, obras, proveedores, setClient
   };
 
   // ── Agente autónomo / chat ────────────────
+  // Cargar empleados desde Supabase
+  useEffect(() => {
+    if (!token) return;
+    sb.get("nominas", token, "select=*").then(data => { if (data?.length) setEmpleados(data.map(e => ({ ...e, salarioBruto: e.salariobruto, fechaAlta: e.fechaalta, irpfManual: "" }))); });
+  }, [token]);
+
   const [activo, setActivo] = useState(false);
   const [estado, setEstado] = useState("idle");
   const [logsChat, setLogsChat] = useState([]);
@@ -2621,7 +2689,7 @@ function Agente({ setFacturas, facturas, clientes, obras, proveedores, setClient
 
       log(`✅ ${parsed.proveedor} — ${formatEURLocal(parsed.total)}`, "success");
       log(`   Base: ${formatEURLocal(parsed.baseImponible)} | IVA: ${formatEURLocal(parsed.cuotaIVA)} | IRPF: -${formatEURLocal(parsed.cuotaIRPF)}`, "detail");
-      setFacturas(prev => [{ id: Date.now(), numero: parsed.numeroFactura || "AUTO", cliente: parsed.proveedor, obra: parsed.concepto, fecha: parsed.fecha, base: parsed.baseImponible, iva: parsed.cuotaIVA, irpf: parsed.cuotaIRPF, total: parsed.total, estado: "Pagada", tipo: "gasto", auto: true }, ...prev]);
+      const nuevaFact = { id: Date.now(), numero: parsed.numeroFactura || "AUTO", cliente: parsed.proveedor, obra: parsed.concepto, fecha: parsed.fecha, base: parsed.baseImponible, iva: parsed.cuotaIVA, irpf: parsed.cuotaIRPF, total: parsed.total, estado: "Pagada", tipo: "gasto", auto: true }; setFacturas(prev => [nuevaFact, ...prev]); if (onSave) onSave(nuevaFact);
       setProcesadas(n => n + 1);
       log(`💾 Registrada en Contabilidad`, "success");
     } catch { log(`❌ Error — Conecta la API Key de Anthropic`, "error"); }
@@ -3011,7 +3079,7 @@ Responde siempre en español, de forma directa y concisa. Cuando cites cifras us
                         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                           <button onClick={() => exportarNominaPDF(e)} style={{ background: "#4caf7d15", border: "1px solid #4caf7d33", color: "#4caf7d", padding: "6px 14px", cursor: "pointer", fontSize: 9, letterSpacing: 2, fontFamily: "'JetBrains Mono', monospace", borderRadius: 2, textTransform: "uppercase" }}>Nomina PDF</button>
                           <button onClick={() => abrirEdicion(e)} style={{ background: "#f0a50015", border: "1px solid #f0a50033", color: "#f0a500", padding: "6px 14px", cursor: "pointer", fontSize: 9, letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>✎ Editar</button>
-                          <button onClick={() => setEmpleados(prev => prev.filter(x => x.id !== e.id))} style={{ background: "#e0525215", border: "1px solid #e0525233", color: "#e05252", padding: "6px 10px", cursor: "pointer", fontSize: 9, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>✕</button>
+                          <button onClick={async () => { await sb.delete("nominas", token, e.id); setEmpleados(prev => prev.filter(x => x.id !== e.id)); }} style={{ background: "#e0525215", border: "1px solid #e0525233", color: "#e05252", padding: "6px 10px", cursor: "pointer", fontSize: 9, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase" }}>✕</button>
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                             <span style={{ fontSize: 10, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace" }}>IRPF%:</span>
                             <input
@@ -3200,7 +3268,7 @@ Responde siempre en español, de forma directa y concisa. Cuando cites cifras us
 
 // ════════════════════════════════════════
 // MÓDULO DOCUMENTOS
-function Documentos({ clientes, proveedores, obras, docs: docsProp, setDocs: setDocsProp }) {
+function Documentos({ clientes, proveedores, obras, docs: docsProp, setDocs: setDocsProp, token }) {
   const [docsLocal, setDocsLocal] = useState([]);
   const docs = docsProp !== undefined ? docsProp : docsLocal;
   const setDocs = docsProp !== undefined ? setDocsProp : setDocsLocal;
@@ -3261,7 +3329,9 @@ function Documentos({ clientes, proveedores, obras, docs: docsProp, setDocs: set
 
   const guardar = () => {
     if (!form.nombre) return;
-    setDocs(prev => [...prev, { ...form, id: Date.now(), subido: new Date().toLocaleDateString("es-ES"), versiones: [{ version: 1, fecha: new Date().toLocaleDateString("es-ES"), nota: "Version inicial" }] }]);
+    const docData = { nombre: form.nombre||"", tipo: form.tipo||"", vinculo: form.vinculo||"", vinculotipo: form.vinculotipo||"", fecha: form.fecha||"", vencimiento: form.vencimiento||"", notas: form.notas||"", contenido: "", subido: new Date().toLocaleDateString("es-ES"), versiones: JSON.stringify([{ version: 1, fecha: new Date().toLocaleDateString("es-ES"), nota: "Version inicial" }]) };
+    const resDoc = await sb.insert("documentos", token, docData);
+    setDocs(prev => [...prev, resDoc?.[0] || { ...form, id: Date.now(), subido: docData.subido, versiones: [{ version: 1, fecha: docData.subido, nota: "Version inicial" }] }]);
     setNuevo(false);
     setForm({ nombre: "", tipo: "Contrato", vinculo: "", vinculoTipo: "proyecto", fecha: "", vencimiento: "", notas: "", contenido: "" });
   };
@@ -3526,7 +3596,7 @@ function Documentos({ clientes, proveedores, obras, docs: docsProp, setDocs: set
 // ════════════════════════════════════════
 // MÓDULO TESORERÍA
 // ════════════════════════════════════════
-function Tesoreria({ facturas, movimientos: movimientosProp, setMovimientos: setMovimientosProp }) {
+function Tesoreria({ facturas, movimientos: movimientosProp, setMovimientos: setMovimientosProp, token }) {
   const [movimientosLocal, setMovimientosLocal] = useState([]);
   const movimientos = movimientosProp !== undefined ? movimientosProp : movimientosLocal;
   const setMovimientos = movimientosProp !== undefined ? setMovimientosProp : setMovimientosLocal;
@@ -3667,7 +3737,9 @@ function Tesoreria({ facturas, movimientos: movimientosProp, setMovimientos: set
 
   const guardar = () => {
     if (!form.concepto || !form.importe) return;
-    setMovimientos(prev => [...prev, { ...form, id: Date.now(), registrado: new Date().toLocaleDateString("es-ES") }]);
+    const movData = { ...form, registrado: new Date().toLocaleDateString("es-ES") };
+    const res2 = await sb.insert("movimientos", token, movData);
+    setMovimientos(prev => [...prev, res2?.[0] || { ...movData, id: Date.now() }]);
     setNuevo(false);
     setForm({ concepto: "", importe: "", tipo: "cobro", fecha: "", vencimiento: "", estado: "Pendiente", categoria: "Clientes" });
   };
@@ -5380,6 +5452,39 @@ export default function App() {
     try { localStorage.setItem("fc_auth_token", token); localStorage.setItem("fc_user", JSON.stringify(userData)); } catch {}
   };
 
+  // Cargar datos de Supabase al iniciar sesión
+  useEffect(() => {
+    if (!authToken || !user || user?.email === ADMIN_EMAIL) return;
+    const cargar = async () => {
+      const [cl, pr, ob, fa, mo, pres, docs, noms] = await Promise.all([
+        sb.get("clientes", authToken, "select=*"),
+        sb.get("proveedores", authToken, "select=*"),
+        sb.get("obras", authToken, "select=*"),
+        sb.get("facturas", authToken, "select=*"),
+        sb.get("movimientos", authToken, "select=*"),
+        sb.get("presupuestos", authToken, "select=*"),
+        sb.get("documentos", authToken, "select=*"),
+        sb.get("nominas", authToken, "select=*"),
+      ]);
+      if (cl?.length) setClientes(cl);
+      if (pr?.length) setProveedores(pr);
+      if (ob?.length) setObras(ob);
+      if (fa?.length) setFacturas(fa);
+      if (mo?.length) setMovimientos(mo);
+      if (pres?.length) setLista(pres);
+      if (docs?.length) setDocs(docs);
+    };
+    cargar();
+  }, [authToken, user]);
+
+  // Sincronizar facturas con Supabase cuando cambien (solo registros nuevos sin id real)
+  const sincronizarFactura = async (factura) => {
+    if (!authToken || String(factura.id).length > 10) return; // ya tiene id de Supabase
+    const data = { numero: factura.numero||"", numerofactura: factura.numerofactura||"", cliente: factura.cliente||"", tipo: factura.tipo||"ingreso", estado: factura.estado||"Pendiente", total: factura.total||0, fecha: factura.fecha||"", concepto: factura.concepto||"", base: factura.base||0, iva: factura.iva||0, irpf: factura.irpf||0, tipoiva: factura.tipoiva||21, tipoirpf: factura.tipoirpf||0, fechavencimiento: factura.fechavencimiento||"", formapago: factura.formapago||"", notas: factura.notas||"", obra: factura.obra||"", manual: !!factura.manual, auto: !!factura.auto, rectificativa: !!factura.rectificativa, origen: factura.origen||"manual" };
+    const res = await sb.insert("facturas", authToken, data);
+    if (res?.[0]) setFacturas(prev => prev.map(f => f.id === factura.id ? res[0] : f));
+  };
+
   const handleLogout = () => {
     setAuthToken(null); setUser(null);
     try { localStorage.removeItem("fc_auth_token"); localStorage.removeItem("fc_user"); localStorage.removeItem("fc_gmail_token"); } catch {}
@@ -5431,15 +5536,15 @@ export default function App() {
       {/* Main */}
       <div style={{ marginLeft: 220, flex: 1, padding: "32px 32px", minHeight: "100vh" }}>
         {tab === "dashboard" && <Dashboard obras={obras} facturas={facturas} proveedores={proveedores} clientes={clientes} setTab={setTab} />}
-        {tab === "obras" && <Obras obras={obras} setObras={setObras} clientes={clientes} facturas={facturas} />}
-        {tab === "clientes" && <Clientes clientes={clientes} setClientes={setClientes} />}
-        {tab === "proveedores" && <Proveedores proveedores={proveedores} setProveedores={setProveedores} />}
-        {tab === "presupuestos" && <Presupuestos facturas={facturas} setFacturas={setFacturas} lista={lista} setLista={setLista} />}
-        {tab === "contabilidad" && <Contabilidad facturas={facturas} setFacturas={setFacturas} clientes={clientes} proveedores={proveedores} />}
-        {tab === "nominas" && <Agente setFacturas={setFacturas} facturas={facturas} clientes={clientes} obras={obras} proveedores={proveedores} setClientes={setClientes} setProveedores={setProveedores} />}
-        {tab === "tesoreria" && <Tesoreria facturas={facturas} movimientos={movimientos} setMovimientos={setMovimientos} />}
-        {tab === "documentos" && <Documentos clientes={clientes} proveedores={proveedores} obras={obras} docs={docs} setDocs={setDocs} />}
-        {tab === "agente" && <Agente setFacturas={setFacturas} facturas={facturas} clientes={clientes} obras={obras} proveedores={proveedores} setClientes={setClientes} setProveedores={setProveedores} />}
+        {tab === "obras" && <Obras obras={obras} setObras={setObras} clientes={clientes} facturas={facturas} token={authToken} />}
+        {tab === "clientes" && <Clientes clientes={clientes} setClientes={setClientes} token={authToken} />}
+        {tab === "proveedores" && <Proveedores proveedores={proveedores} setProveedores={setProveedores} token={authToken} />}
+        {tab === "presupuestos" && <Presupuestos facturas={facturas} setFacturas={setFacturas} lista={lista} setLista={setLista} token={authToken} />}
+        {tab === "contabilidad" && <Contabilidad facturas={facturas} setFacturas={setFacturas} clientes={clientes} proveedores={proveedores} token={authToken} onSave={sincronizarFactura} />}
+        {tab === "nominas" && <Agente setFacturas={setFacturas} facturas={facturas} clientes={clientes} obras={obras} proveedores={proveedores} setClientes={setClientes} setProveedores={setProveedores} initialSubtab="empleados" token={authToken} onSave={sincronizarFactura} />}
+        {tab === "tesoreria" && <Tesoreria facturas={facturas} movimientos={movimientos} setMovimientos={setMovimientos} token={authToken} />}
+        {tab === "documentos" && <Documentos clientes={clientes} proveedores={proveedores} obras={obras} docs={docs} setDocs={setDocs} token={authToken} />}
+        {tab === "agente" && <Agente setFacturas={setFacturas} facturas={facturas} clientes={clientes} obras={obras} proveedores={proveedores} setClientes={setClientes} setProveedores={setProveedores} initialSubtab="chat" token={authToken} onSave={sincronizarFactura} />}
         {tab === "informes" && <Informes facturas={facturas} obras={obras} proveedores={proveedores} clientes={clientes} />}
         {tab === "analitica" && <Analitica facturas={facturas} obras={obras} />}
       </div>
