@@ -2360,6 +2360,41 @@ function Agente({ setFacturas, facturas, clientes, obras, proveedores, setClient
   const [gmailToken, setGmailToken] = useState(() => { try { return localStorage.getItem("fc_gmail_token"); } catch { return null; } });
   const [procesando, setProcesando] = useState(false);
   const [logs, setLogs] = useState([]);
+  // ── Nóminas ──
+  const CATEGORIAS = ["Oficial 1ª","Oficial 2ª","Oficial 3ª","Ayudante","Peón","Encargado","Jefe de obra","Administrativo","Técnico"];
+  const CONTRATOS = ["Indefinido","Temporal","Obra y servicio","Prácticas"];
+  const CONVENIOS = ["Construcción y obras públicas","Metal","Madera","Transporte","General"];
+  const labelStyle = { fontSize: 10, color: "#94a3b8", letterSpacing: 3, fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase", marginBottom: 6 };
+  const inputStyle = { width: "100%", background: "#ffffff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" };
+  const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+  const [empleados, setEmpleados] = useState([]);
+  const [nuevo, setNuevo] = useState(false);
+  const [form, setForm] = useState({ nombre: "", dni: "", fechaAlta: "", salarioBruto: "", proyecto: "", iban: "", categoria: "", contrato: "Indefinido", convenio: "Construcción y obras públicas", hijos: 0, casado: false, discapacidad: false, irpfManual: "" });
+  const [editandoId, setEditandoId] = useState(null);
+  const [formEdit, setFormEdit] = useState({});
+  const [mesNomina, setMesNomina] = useState(new Date().getMonth());
+  const calcularNomina = (e) => {
+    const bruto = parseFloat(e.salarioBruto) || 0;
+    const ssTrabajador = bruto * 0.0635;
+    const ssEmpresa = bruto * 0.2360;
+    const baseIRPF = bruto - ssTrabajador;
+    let tipoIRPF = e.irpfManual !== "" ? parseFloat(e.irpfManual)/100 : bruto < 1200 ? 0.02 : bruto < 1800 ? 0.10 : bruto < 2500 ? 0.15 : bruto < 3500 ? 0.20 : 0.24;
+    if (e.hijos > 0) tipoIRPF = Math.max(0, tipoIRPF - e.hijos * 0.02);
+    const irpf = baseIRPF * tipoIRPF;
+    const neto = bruto - ssTrabajador - irpf;
+    return { bruto, ssTrabajador, ssEmpresa, irpf, neto, tipoIRPF, costeEmpresa: bruto + ssEmpresa };
+  };
+  const totalSS = empleados.reduce((s, e) => s + calcularNomina(e).ssEmpresa, 0);
+  const totalNeto = empleados.reduce((s, e) => s + calcularNomina(e).neto, 0);
+  const totalNominas = empleados.reduce((s, e) => { const n = calcularNomina(e); return s + n.bruto + n.ssEmpresa; }, 0);
+  const guardarEmpleado = () => { if (!form.nombre) return; setEmpleados(prev => [...prev, { ...form, id: Date.now() }]); setForm({ nombre: "", dni: "", fechaAlta: "", salarioBruto: "", proyecto: "", iban: "", categoria: "", contrato: "Indefinido", convenio: "Construcción y obras públicas", hijos: 0, casado: false, discapacidad: false, irpfManual: "" }); setNuevo(false); };
+  const abrirEdicion = (e) => { setEditandoId(e.id); setFormEdit({ ...e }); };
+  const guardarEdicion = () => { setEmpleados(prev => prev.map(e => e.id === editandoId ? { ...e, ...formEdit } : e)); setEditandoId(null); setFormEdit({}); };
+  const exportarNominaPDF = (e) => { const n = calcularNomina(e); const html = `<html><body style="font-family:Arial;max-width:700px;margin:30px auto"><h2>NÓMINA — ${e.nombre}</h2><p>DNI: ${e.dni} · Alta: ${e.fechaAlta}</p><table width="100%"><tr><td>Salario bruto</td><td>${n.bruto.toFixed(2)} €</td></tr><tr><td>SS trabajador</td><td>-${n.ssTrabajador.toFixed(2)} €</td></tr><tr><td>IRPF ${(n.tipoIRPF*100).toFixed(1)}%</td><td>-${n.irpf.toFixed(2)} €</td></tr><tr><td><b>NETO</b></td><td><b>${n.neto.toFixed(2)} €</b></td></tr></table></body></html>`; const w = window.open("","_blank"); w.document.write(html); w.print(); };
+  const exportarGestoria = () => { const rows = empleados.map(e => { const n = calcularNomina(e); return `${e.nombre}	${e.dni}	${n.bruto.toFixed(2)}	${n.ssTrabajador.toFixed(2)}	${n.ssEmpresa.toFixed(2)}	${n.irpf.toFixed(2)}	${n.neto.toFixed(2)}`; }).join("
+"); const blob = new Blob([`Empleado	DNI	Bruto	SS Trab.	SS Emp.	IRPF	Neto
+${rows}`], {type:"text/plain"}); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `nominas_${MESES[mesNomina]}.txt`; a.click(); };
+  const formatEURLocal = (n) => new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" }).format(n || 0);
   const [facturasAgente, setFacturasAgente] = useState([]);
 
   const addLog = (msg, tipo = "info") => setLogs(prev => [...prev, { msg, tipo }]);
