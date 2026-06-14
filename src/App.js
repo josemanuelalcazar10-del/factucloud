@@ -2491,9 +2491,13 @@ function Agente({ setFacturas, facturas, clientes, obras, proveedores, setClient
   const CONVENIOS = ["Construcción y obras públicas","Metal","Madera","Transporte","General"];
   const labelStyle = { fontSize: 10, color: "#94a3b8", letterSpacing: 3, fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase", marginBottom: 6 };
   const inputStyle = { width: "100%", background: "#ffffff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" };
+  const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
   const [empleados, setEmpleados] = useState([]);
   const [nuevo, setNuevo] = useState(false);
   const [form, setForm] = useState({ nombre: "", dni: "", fechaAlta: "", salarioBruto: "", proyecto: "", iban: "", categoria: "", contrato: "Indefinido", convenio: "Construcción y obras públicas", hijos: 0, casado: false, discapacidad: false, irpfManual: "" });
+  const [editandoId, setEditandoId] = useState(null);
+  const [formEdit, setFormEdit] = useState({});
+  const [mesNomina, setMesNomina] = useState(new Date().getMonth());
 
   const calcularNomina = (e) => {
     const bruto = parseFloat(e.salarioBruto) || 0;
@@ -2514,6 +2518,19 @@ function Agente({ setFacturas, facturas, clientes, obras, proveedores, setClient
   };
 
   const totalSS = empleados.reduce((s, e) => s + calcularNomina(e).ssEmpresa, 0);
+  const totalNeto = empleados.reduce((s, e) => s + calcularNomina(e).neto, 0);
+  const totalNominas = empleados.reduce((s, e) => { const n = calcularNomina(e); return s + n.bruto + n.ssEmpresa; }, 0);
+
+  const abrirEdicion = (e) => { setEditandoId(e.id); setFormEdit({ ...e }); };
+  const guardarEdicion = () => { setEmpleados(prev => prev.map(e => e.id === editandoId ? { ...e, ...formEdit } : e)); setEditandoId(null); setFormEdit({}); };
+
+  const exportarGestoria = () => {
+    const mes = MESES[mesNomina];
+    const rows = empleados.map(e => { const n = calcularNomina(e); return `${e.nombre}\t${e.dni}\t${n.bruto.toFixed(2)}\t${n.ssTrabajador.toFixed(2)}\t${n.ssEmpresa.toFixed(2)}\t${n.irpf.toFixed(2)}\t${n.neto.toFixed(2)}`; }).join("\n");
+    const content = `CUADRO DE COTIZACIÓN — ${mes} ${new Date().getFullYear()}\nEmpleado\tDNI\tBruto\tSS Trab.\tSS Emp.\tIRPF\tNeto\n${rows}`;
+    const blob = new Blob([content], { type: "text/plain" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `cotizacion_${mes}.txt`; a.click();
+  };
 
   const exportarNominaPDF = (e) => {
     const n = calcularNomina(e);
