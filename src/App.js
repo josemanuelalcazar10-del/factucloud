@@ -2485,6 +2485,43 @@ function Agente({ setFacturas, facturas, clientes, obras, proveedores, setClient
     }
     setProcesando(false);
   };
+  // ── Nóminas ──────────────────────────────
+  const CATEGORIAS = ["Oficial 1ª","Oficial 2ª","Oficial 3ª","Ayudante","Peón","Encargado","Jefe de obra","Administrativo","Técnico","Gruísta","Electricista","Fontanero","Soldador"];
+  const CONTRATOS = ["Indefinido","Temporal","Obra y servicio","Prácticas","Formación"];
+  const CONVENIOS = ["Construcción y obras públicas","Metal","Madera","Transporte","General"];
+  const labelStyle = { fontSize: 10, color: "#94a3b8", letterSpacing: 3, fontFamily: "'JetBrains Mono', monospace", textTransform: "uppercase", marginBottom: 6 };
+  const inputStyle = { width: "100%", background: "#ffffff", border: "1px solid #e2e8f0", color: "#334155", padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", borderRadius: 2, outline: "none", boxSizing: "border-box" };
+  const [empleados, setEmpleados] = useState([]);
+  const [nuevo, setNuevo] = useState(false);
+  const [form, setForm] = useState({ nombre: "", dni: "", fechaAlta: "", salarioBruto: "", proyecto: "", iban: "", categoria: "", contrato: "Indefinido", convenio: "Construcción y obras públicas", hijos: 0, casado: false, discapacidad: false, irpfManual: "" });
+
+  const calcularNomina = (e) => {
+    const bruto = parseFloat(e.salarioBruto) || 0;
+    const ssTrabajador = bruto * 0.0635;
+    const ssEmpresa = bruto * 0.2360;
+    const baseIRPF = bruto - ssTrabajador;
+    let tipoIRPF = 0.15;
+    if (e.irpfManual !== undefined && e.irpfManual !== "") tipoIRPF = parseFloat(e.irpfManual) / 100;
+    else if (bruto < 1200) tipoIRPF = 0.02;
+    else if (bruto < 1800) tipoIRPF = 0.10;
+    else if (bruto < 2500) tipoIRPF = 0.15;
+    else if (bruto < 3500) tipoIRPF = 0.20;
+    else tipoIRPF = 0.24;
+    if (e.hijos > 0) tipoIRPF = Math.max(0, tipoIRPF - e.hijos * 0.02);
+    const irpf = baseIRPF * tipoIRPF;
+    const neto = bruto - ssTrabajador - irpf;
+    return { bruto, ssTrabajador, ssEmpresa, irpf, neto, tipoIRPF };
+  };
+
+  const totalSS = empleados.reduce((s, e) => s + calcularNomina(e).ssEmpresa, 0);
+
+  const exportarNominaPDF = (e) => {
+    const n = calcularNomina(e);
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Nómina ${e.nombre}</title><style>body{font-family:Arial,sans-serif;max-width:700px;margin:30px auto;padding:20px;font-size:13px}h2{color:#1e293b;border-bottom:2px solid #f0a500;padding-bottom:8px}.row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f1f5f9}.total{font-size:18px;color:#f0a500;font-weight:bold}</style></head><body><h2>NÓMINA — ${e.nombre}</h2><p>DNI: ${e.dni} · Alta: ${e.fechaAlta} · Convenio: ${e.convenio}</p><div class="row"><span>Salario bruto</span><span>${n.bruto.toFixed(2)} €</span></div><div class="row"><span>SS trabajador (6,35%)</span><span>-${n.ssTrabajador.toFixed(2)} €</span></div><div class="row"><span>IRPF (${(n.tipoIRPF*100).toFixed(1)}%)</span><span>-${n.irpf.toFixed(2)} €</span></div><div class="row total"><span>NETO A PERCIBIR</span><span>${n.neto.toFixed(2)} €</span></div><p style="margin-top:20px;font-size:11px;color:#888">SS empresa: ${n.ssEmpresa.toFixed(2)} € · Coste total empresa: ${(n.bruto+n.ssEmpresa).toFixed(2)} €</p></body></html>`;
+    const w = window.open("", "_blank"); w.document.write(html); w.document.close(); w.print();
+  };
+
+  // ── Agente autónomo / chat ────────────────
   const [activo, setActivo] = useState(false);
   const [estado, setEstado] = useState("idle");
   const [logsChat, setLogsChat] = useState([]);
