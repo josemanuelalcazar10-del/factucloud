@@ -2499,8 +2499,6 @@ function Agente({ setFacturas, facturas, clientes, obras, proveedores, setClient
   const [formEdit, setFormEdit] = useState({});
   const [mesNomina, setMesNomina] = useState(new Date().getMonth());
 
-  const formatEURLocal = (v) => new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" }).format(v || 0);
-
   const calcularNomina = (e) => {
     const bruto = parseFloat(e.salarioBruto) || 0;
     const ssTrabajador = bruto * 0.0635;
