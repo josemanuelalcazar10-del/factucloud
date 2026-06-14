@@ -2499,6 +2499,8 @@ function Agente({ setFacturas, facturas, clientes, obras, proveedores, setClient
   const [formEdit, setFormEdit] = useState({});
   const [mesNomina, setMesNomina] = useState(new Date().getMonth());
 
+  const formatEURLocal = (v) => new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" }).format(v || 0);
+
   const calcularNomina = (e) => {
     const bruto = parseFloat(e.salarioBruto) || 0;
     const ssTrabajador = bruto * 0.0635;
@@ -2514,7 +2516,8 @@ function Agente({ setFacturas, facturas, clientes, obras, proveedores, setClient
     if (e.hijos > 0) tipoIRPF = Math.max(0, tipoIRPF - e.hijos * 0.02);
     const irpf = baseIRPF * tipoIRPF;
     const neto = bruto - ssTrabajador - irpf;
-    return { bruto, ssTrabajador, ssEmpresa, irpf, neto, tipoIRPF };
+    const costeEmpresa = bruto + ssEmpresa;
+    return { bruto, ssTrabajador, ssEmpresa, irpf, neto, tipoIRPF, costeEmpresa };
   };
 
   const totalSS = empleados.reduce((s, e) => s + calcularNomina(e).ssEmpresa, 0);
@@ -2523,6 +2526,7 @@ function Agente({ setFacturas, facturas, clientes, obras, proveedores, setClient
 
   const abrirEdicion = (e) => { setEditandoId(e.id); setFormEdit({ ...e }); };
   const guardarEdicion = () => { setEmpleados(prev => prev.map(e => e.id === editandoId ? { ...e, ...formEdit } : e)); setEditandoId(null); setFormEdit({}); };
+  const guardarEmpleado = () => { if (!form.nombre) return; setEmpleados(prev => [...prev, { ...form, id: Date.now() }]); setForm({ nombre: "", dni: "", fechaAlta: "", salarioBruto: "", proyecto: "", iban: "", categoria: "", contrato: "Indefinido", convenio: "Construcción y obras públicas", hijos: 0, casado: false, discapacidad: false, irpfManual: "" }); setNuevo(false); };
 
   const exportarGestoria = () => {
     const mes = MESES[mesNomina];
