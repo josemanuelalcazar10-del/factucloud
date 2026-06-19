@@ -3103,14 +3103,14 @@ export default function FactuCloudApp() {
         {tab === "analitica" && <Analitica facturas={facturas} obras={obras} />}
         {tab === "tesoreria" && <Tesoreria facturas={facturas} movimientos={movimientosList} setMovimientos={setMovimientos} />}
         {tab === "informes" && <Informes facturas={facturas} obras={obras} proveedores={proveedores} clientes={clientes} />}
-        {tab === "obras" && <Obras obras={obras} setObras={setObras} clientes={clientes} facturas={facturas} />}
-        {tab === "proveedores" && <Proveedores proveedores={proveedores} setProveedores={setProveedores} />}
-        {tab === "clientes" && <Clientes clientes={clientes} setClientes={setClientes} />}
+        {tab === "obras" && <Obras obras={obras} setObras={setObrasState} clientes={clientes} facturas={facturas} />}
+        {tab === "proveedores" && <Proveedores proveedores={proveedores} setProveedores={setProveedoresState} />}
+        {tab === "clientes" && <Clientes clientes={clientes} setClientes={setClientesState} />}
         {tab === "nominas" && <Nominas empleados={empleados} setEmpleados={setEmpleados} />}
-        {tab === "presupuestos" && <Presupuestos facturas={facturas} setFacturas={setFacturas} lista={presupuestosList} setLista={setPresupuestos} />}
-        {tab === "contabilidad" && <Contabilidad facturas={facturas} setFacturas={setFacturas} empresa={empresa} clientes={clientes} proveedores={proveedores} />}
+        {tab === "presupuestos" && <Presupuestos facturas={facturas} setFacturas={setFacturasState} lista={presupuestosList} setLista={setPresupuestos} />}
+        {tab === "contabilidad" && <Contabilidad facturas={facturas} setFacturas={setFacturasState} empresa={empresa} clientes={clientes} proveedores={proveedores} />}
         {tab === "documentos" && <Documentos clientes={clientes} proveedores={proveedores} obras={obras} docs={documentosList} setDocs={setDocumentos} />}
-        {tab === "agente" && <Agente setFacturas={setFacturas} facturas={facturas} clientes={clientes} obras={obras} proveedores={proveedores} />}
+        {tab === "agente" && <Agente setFacturas={setFacturasState} facturas={facturas} clientes={clientes} obras={obras} proveedores={proveedores} setProveedores={setProveedoresState} />}
         {tab === "ajustes" && <Ajustes empresa={empresa} setEmpresa={emp => { setEmpresa(emp); try { localStorage.setItem("fc_empresa", JSON.stringify(emp)); } catch {} }} />}
       </div>
 
