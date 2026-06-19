@@ -250,8 +250,8 @@ function Obras({ obras, setObras, clientes: clientesProp, facturas }) {
   const [form, setForm] = useState({
     nombre: "", codigo: "", tipo: "Edificacion", cliente: "", responsable: "",
     direccion: "", municipio: "", provincia: "", inicio: "", fin: "",
-    presupuesto: "", margenObj: 20, estado: "Pendiente inicio",
-    descripcion: "", arquitecto: ""
+    presupuesto: "", importeContratado: "", margenObj: 20, estado: "Pendiente inicio",
+    descripcion: "", arquitecto: "", expediente: "", tags: ""
   });
   const [formEdit, setFormEdit] = useState({});
   const [nuevaCert, setNuevaCert] = useState(false);
@@ -316,15 +316,22 @@ function Obras({ obras, setObras, clientes: clientesProp, facturas }) {
 
   // KPIs económicos de la obra
   const calcularKPIs = (o) => {
-    const presupuesto = o.presupuesto || 0;
+    const presupuesto = parseFloat(o.presupuesto) || 0;
+    const importeContratado = parseFloat(o.importeContratado) || presupuesto;
     const certificado = o.certificado || 0;
     const facturasObra = (facturas||[]).filter(f => f.concepto?.includes(o.nombre) || f.obra === o.nombre);
     const facturado = facturasObra.filter(f => f.tipo === "ingreso").reduce((s,f) => s+(f.total||0), 0);
     const gastado = facturasObra.filter(f => f.tipo === "gasto").reduce((s,f) => s+(f.total||0), 0);
-    const margenReal = facturado > 0 ? ((facturado - gastado) / facturado * 100).toFixed(1) : 0;
+    // Desglose gastos por categoría
+    const gastosMateriales = facturasObra.filter(f => f.tipo === "gasto" && (f.categoria === "Materiales" || f.concepto?.toLowerCase().includes("material"))).reduce((s,f) => s+(f.total||0), 0);
+    const gastosSubcontratas = facturasObra.filter(f => f.tipo === "gasto" && (f.categoria === "Subcontratas" || f.concepto?.toLowerCase().includes("subcontrat"))).reduce((s,f) => s+(f.total||0), 0);
+    const gastosIndirectos = gastado - gastosMateriales - gastosSubcontratas;
+    const margenReal = importeContratado > 0 ? ((importeContratado - gastado) / importeContratado * 100).toFixed(1) : 0;
     const desviacion = presupuesto > 0 ? (((gastado - presupuesto) / presupuesto) * 100).toFixed(1) : 0;
     const pendienteFact = certificado - facturado;
-    return { presupuesto, certificado, facturado, gastado, margenReal, desviacion, pendienteFact };
+    const pctEjecucion = presupuesto > 0 ? Math.min(100, (gastado / presupuesto * 100)).toFixed(0) : 0;
+    const pctFacturado = importeContratado > 0 ? Math.min(100, (facturado / importeContratado * 100)).toFixed(0) : 0;
+    return { presupuesto, importeContratado, certificado, facturado, gastado, margenReal, desviacion, pendienteFact, gastosMateriales, gastosSubcontratas, gastosIndirectos, pctEjecucion, pctFacturado };
   };
 
   return (
@@ -370,9 +377,12 @@ function Obras({ obras, setObras, clientes: clientesProp, facturas }) {
                 {ESTADOS.map(s => <option key={s}>{s}</option>)}
               </select>
             </div>
-            <div><div style={lbl}>Fecha inicio</div><input value={form.inicio} onChange={e => setForm(p=>({...p,inicio:e.target.value}))} style={inp} /></div>
-            <div><div style={lbl}>Fecha fin prevista</div><input value={form.fin} onChange={e => setForm(p=>({...p,fin:e.target.value}))} style={inp} /></div>
-            <div style={{ gridColumn: "1/-1" }}><div style={lbl}>Descripción del proyecto</div><textarea value={form.descripcion} onChange={e => setForm(p=>({...p,descripcion:e.target.value}))} style={{...inp, minHeight: 60, resize: "vertical"}} /></div>
+            <div><div style={lbl}>Fecha inicio</div><input type="date" value={form.inicio} onChange={e => setForm(p=>({...p,inicio:e.target.value}))} style={inp} /></div>
+            <div><div style={lbl}>Fecha fin prevista</div><input type="date" value={form.fin} onChange={e => setForm(p=>({...p,fin:e.target.value}))} style={inp} /></div>
+            <div><div style={lbl}>Importe contratado (€)</div><input type="number" value={form.importeContratado} onChange={e => setForm(p=>({...p,importeContratado:e.target.value}))} placeholder="Lo que cobra al cliente" style={inp} /></div>
+            <div><div style={lbl}>Nº Expediente / Licencia</div><input value={form.expediente} onChange={e => setForm(p=>({...p,expediente:e.target.value}))} placeholder="EXP-2026-001" style={inp} /></div>
+            <div style={{ gridColumn: "1/-1" }}><div style={lbl}>Etiquetas (separadas por coma)</div><input value={form.tags} onChange={e => setForm(p=>({...p,tags:e.target.value}))} placeholder="reforma, vivienda, urgente..." style={inp} /></div>
+            <div style={{ gridColumn: "1/-1" }}><div style={lbl}>Descripción del proyecto</div><textarea value={form.descripcion} onChange={e => setForm(p=>({...p,descripcion:e.target.value}))} style={{...inp, minHeight: 80, resize: "vertical"}} /></div>
           </div>
           <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
             <button onClick={guardar} style={{ background: "#f0a500", color: "#f8f9fa", border: "none", padding: "12px 28px", cursor: "pointer", fontSize: 11, letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 2, textTransform: "uppercase" }}>✓ Guardar proyecto</button>
@@ -545,6 +555,59 @@ function Obras({ obras, setObras, clientes: clientesProp, facturas }) {
                     </div>
                   </div>
                 </div>
+                {/* Curva de avance */}
+                <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 3, padding: "20px", marginBottom: 14 }}>
+                  <div style={{ fontSize: 10, color: "#f0a500", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 14 }}>Curva de avance</div>
+                  {[
+                    { label: "% Ejecutado (coste real / presupuesto)", pct: kpi.pctEjecucion, color: "#e05252" },
+                    { label: "% Facturado (facturado / contrato)", pct: kpi.pctFacturado, color: "#4caf7d" },
+                    { label: "% Certificado (certificado / presupuesto)", pct: kpi.presupuesto > 0 ? Math.min(100, (kpi.certificado / kpi.presupuesto * 100)).toFixed(0) : 0, color: "#7eb8f5" },
+                  ].map(({ label, pct, color }) => (
+                    <div key={label} style={{ marginBottom: 12 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                        <span style={{ fontSize: 11, color: "#64748b", fontFamily: "'JetBrains Mono',monospace" }}>{label}</span>
+                        <span style={{ fontSize: 12, color, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold" }}>{pct}%</span>
+                      </div>
+                      <div style={{ height: 8, background: "#f1f5f9", borderRadius: 4, overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${pct}%`, background: color, borderRadius: 4, transition: "width .5s" }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Desglose por partidas */}
+                <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 3, padding: "20px", marginBottom: 14 }}>
+                  <div style={{ fontSize: 10, color: "#f0a500", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 14 }}>Desglose de costes</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                    {[
+                      { label: "Materiales", valor: kpi.gastosMateriales, color: "#7eb8f5" },
+                      { label: "Subcontratas", valor: kpi.gastosSubcontratas, color: "#a78bfa" },
+                      { label: "Indirectos / Otros", valor: kpi.gastosIndirectos, color: "#f0a500" },
+                    ].map(({ label, valor, color }) => (
+                      <div key={label} style={{ background: "#f8fafc", border: `1px solid ${color}33`, borderTop: `2px solid ${color}`, borderRadius: 3, padding: "14px 16px" }}>
+                        <div style={{ fontSize: 9, color: "#94a3b8", letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 6 }}>{label}</div>
+                        <div style={{ fontSize: 18, color, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold" }}>{new Intl.NumberFormat("es-ES",{style:"currency",currency:"EUR",maximumFractionDigits:0}).format(valor)}</div>
+                        <div style={{ fontSize: 9, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace", marginTop: 4 }}>{kpi.gastado > 0 ? (valor/kpi.gastado*100).toFixed(0) : 0}% del total</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Importe contratado vs presupuesto */}
+                {kpi.importeContratado !== kpi.presupuesto && kpi.importeContratado > 0 && (
+                  <div style={{ background: "#f0fff4", border: "1px solid #4caf7d33", borderRadius: 3, padding: "16px 20px", marginBottom: 14 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div>
+                        <div style={{ fontSize: 10, color: "#94a3b8", letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 4 }}>Margen comercial (contrato - presupuesto)</div>
+                        <div style={{ fontSize: 13, color: "#334155" }}>Contrato: {new Intl.NumberFormat("es-ES",{style:"currency",currency:"EUR",maximumFractionDigits:0}).format(kpi.importeContratado)} · Presupuesto interno: {new Intl.NumberFormat("es-ES",{style:"currency",currency:"EUR",maximumFractionDigits:0}).format(kpi.presupuesto)}</div>
+                      </div>
+                      <div style={{ fontSize: 22, fontWeight: 700, color: "#4caf7d", fontFamily: "'JetBrains Mono',monospace" }}>
+                        {new Intl.NumberFormat("es-ES",{style:"currency",currency:"EUR",maximumFractionDigits:0}).format(kpi.importeContratado - kpi.presupuesto)}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Facturas vinculadas */}
                 <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 3, padding: "20px" }}>
                   <div style={{ fontSize: 10, color: "#7eb8f5", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 14 }}>Facturas vinculadas a esta obra</div>
@@ -1652,6 +1715,9 @@ function Contabilidad({ facturas, setFacturas, empresa: empProp, clientes: clien
                       <td style={{ padding: "13px 14px" }}>
                         {bloqueada ? (
                           <div style={{ display: "flex", gap: 4 }}>
+                          {f.estado === "Borrador" && (
+                            <button onClick={() => setFacturas(prev => prev.map(x => x.id === f.id ? {...x, estado: "Emitida"} : x))} style={{ background: "#f0a50015", border: "1px solid #f0a50033", color: "#f0a500", padding: "5px 10px", cursor: "pointer", fontSize: 9, letterSpacing: 1, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase", whiteSpace: "nowrap" }}>✓ Registrar</button>
+                          )}
                           {f.estado === "Emitida" && f.tipo === "ingreso" && (
                             <button onClick={() => setFacturas(prev => prev.map(x => x.id === f.id ? {...x, estado: "Cobrada"} : x))} style={{ background: "#4caf7d15", border: "1px solid #4caf7d33", color: "#4caf7d", padding: "5px 10px", cursor: "pointer", fontSize: 9, letterSpacing: 1, fontFamily: "'JetBrains Mono',monospace", borderRadius: 2, textTransform: "uppercase", whiteSpace: "nowrap" }}>✓ Cobrada</button>
                           )}
@@ -2365,6 +2431,8 @@ function Agente({ setFacturas, facturas, clientes, obras, proveedores, setProvee
   const [gmailToken, setGmailToken] = useState(() => { try { return localStorage.getItem("fc_gmail_token"); } catch { return null; } });
   const [procesando, setProcesando] = useState(false);
   const [facturasAgente, setFacturasAgente] = useState([]);
+  const [modalFactura, setModalFactura] = useState(null); // factura pendiente de asignar proyecto
+  const [obraSeleccionada, setObraSeleccionada] = useState("");
 
   const conectarGmail = () => {
     const params = new URLSearchParams({ client_id: GMAIL_CLIENT_ID, redirect_uri: window.location.origin, response_type: "token", scope: GMAIL_SCOPE, prompt: "consent" });
@@ -2382,14 +2450,50 @@ function Agente({ setFacturas, facturas, clientes, obras, proveedores, setProvee
     }, 500);
   };
 
+  const confirmarFactura = () => {
+    if (!modalFactura) return;
+    const facturaFinal = { ...modalFactura, obra: obraSeleccionada || "" };
+    delete facturaFinal._raw;
+    setFacturas(prev => [...prev, facturaFinal]);
+    // Guardar en Supabase
+    const token = localStorage.getItem("fc_auth_token");
+    if (token) fetch(`${SUPABASE_URL}/rest/v1/facturas`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "apikey": SUPABASE_KEY, "Authorization": `Bearer ${token}`, "Prefer": "return=minimal" },
+      body: JSON.stringify({ numero: facturaFinal.numero, cliente: facturaFinal.cliente, concepto: facturaFinal.concepto, fecha: facturaFinal.fecha, base: facturaFinal.base, iva: facturaFinal.iva, total: facturaFinal.total, estado: facturaFinal.estado, tipo: facturaFinal.tipo, obra: facturaFinal.obra, auto: true, origen: "gmail" })
+    });
+    setModalFactura(null);
+    setObraSeleccionada("");
+  };
+
+  const parseNum = (v) => {
+    if (typeof v === "number") return v;
+    if (!v) return 0;
+    // Soporta "1.234,56" y "1234.56"
+    const s = String(v).replace(/[€$\s]/g, "");
+    if (s.includes(",") && s.includes(".")) return parseFloat(s.replace(/\./g, "").replace(",", ".")) || 0;
+    if (s.includes(",")) return parseFloat(s.replace(",", ".")) || 0;
+    return parseFloat(s) || 0;
+  };
+
   const procesarFacturasGmail = async () => {
     if (!gmailToken) return;
     setProcesando(true); setFacturasAgente([]);
+    // Cargar IDs ya procesados del localStorage
+    let procesadosIds;
+    try { procesadosIds = new Set(JSON.parse(localStorage.getItem("fc_gmail_procesados") || "[]")); } catch { procesadosIds = new Set(); }
     try {
-      const searchRes = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages?q=has:attachment+filename:pdf+newer_than:30d&maxResults=10", { headers: { Authorization: `Bearer ${gmailToken}` } });
+      // Solo emails de hoy
+      const hoy = new Date();
+      const fechaQuery = `${hoy.getFullYear()}/${String(hoy.getMonth()+1).padStart(2,"0")}/${String(hoy.getDate()).padStart(2,"0")}`;
+      const searchRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=has:attachment+filename:pdf+after:${fechaQuery}&maxResults=20`, { headers: { Authorization: `Bearer ${gmailToken}` } });
       if (!searchRes.ok) { setProcesando(false); setGmailToken(null); return; }
       const { messages = [] } = await searchRes.json();
-      for (const msg of messages.slice(0, 5)) {
+      // Filtrar los ya procesados
+      const nuevos = messages.filter(m => !procesadosIds.has(m.id));
+      if (nuevos.length === 0) { setFacturasAgente([{ proveedor: "Sin facturas nuevas hoy", registrada: false }]); setProcesando(false); return; }
+      for (const msg of nuevos.slice(0, 10)) {
+        procesadosIds.add(msg.id);
         const msgData = await (await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}`, { headers: { Authorization: `Bearer ${gmailToken}` } })).json();
         const subject = msgData.payload?.headers?.find(h => h.name === "Subject")?.value || "Sin asunto";
         const parts = msgData.payload?.parts || [];
@@ -2402,19 +2506,29 @@ function Agente({ setFacturas, facturas, clientes, obras, proveedores, setProvee
         let factura;
         try { factura = JSON.parse((claudeData.content?.[0]?.text || "{}").replace(/```json|```/g, "").trim()); } catch { continue; }
         if (factura.proveedor && setProveedores) {
-          const existe = (proveedores || []).find(p => p.nombre === factura.proveedor);
+          const normalizar = s => (s || "").toLowerCase().trim().replace(/[.,\-_]/g, "");
+          const existe = (proveedores || []).find(p =>
+            (factura.cif && p.cif && p.cif === factura.cif) ||
+            normalizar(p.nombre) === normalizar(factura.proveedor)
+          );
           if (!existe) setProveedores(prev => [...prev, { id: Date.now(), nombre: factura.proveedor, cif: factura.cif || "", email: "", tel: "", categoria: "Otros", condicionesPago: "30 días", facturado: 0, pendiente: 0 }]);
         }
         if (setFacturas && factura.total > 0) {
-          const nuevaFact = { id: Date.now(), numero: factura.numeroFactura || `G-${Date.now()}`, cliente: factura.proveedor, concepto: factura.concepto || subject, fecha: factura.fecha || new Date().toLocaleDateString("es-ES"), base: factura.base || 0, iva: (factura.base || 0) * (factura.iva || 21) / 100, total: factura.total, estado: "Pendiente", tipo: "gasto", auto: true, origen: "gmail" };
-          setFacturas(prev => [...prev, nuevaFact]);
-          // Guardar en Supabase
-          const token = localStorage.getItem("fc_auth_token");
-          if (token) fetch(`${SUPABASE_URL}/rest/v1/facturas`, { method: "POST", headers: { "Content-Type": "application/json", "apikey": SUPABASE_KEY, "Authorization": `Bearer ${token}`, "Prefer": "return=minimal" }, body: JSON.stringify({ numero: nuevaFact.numero, cliente: nuevaFact.cliente, concepto: nuevaFact.concepto, fecha: nuevaFact.fecha, base: nuevaFact.base, iva: nuevaFact.iva, total: nuevaFact.total, estado: nuevaFact.estado, tipo: nuevaFact.tipo, auto: true, origen: "gmail" }) });
+          const nuevaFact = { id: Date.now(), numero: factura.numeroFactura || `G-${Date.now()}`, cliente: factura.proveedor, concepto: factura.concepto || subject, fecha: factura.fecha || new Date().toLocaleDateString("es-ES"), base: parseNum(factura.base), iva: parseNum(factura.iva) || parseNum(factura.base) * 0.21, total: parseNum(factura.total), estado: "Borrador", tipo: "gasto", auto: true, origen: "gmail" };
+          // Mostrar modal para asignar proyecto antes de registrar
+          const factDuplicada = factura.numeroFactura && (facturas || []).find(f => f.numero === factura.numeroFactura);
+          if (!factDuplicada) {
+            setModalFactura({ ...nuevaFact, _raw: factura });
+            setObraSeleccionada("");
+            // Esperar a que el usuario asigne proyecto (o cierre el modal)
+            await new Promise(r => setTimeout(r, 200));
+          }
         }
         setFacturasAgente(prev => [...prev, { ...factura, registrada: true }]);
         await new Promise(r => setTimeout(r, 500));
       }
+      // Guardar IDs procesados para evitar duplicados futuros
+      try { localStorage.setItem("fc_gmail_procesados", JSON.stringify([...procesadosIds])); } catch {}
     } catch {}
     setProcesando(false);
   };
@@ -2588,6 +2702,37 @@ Responde siempre en español, de forma directa y concisa. Cuando cites cifras us
 
   return (
     <div>
+      {/* MODAL ASIGNAR PROYECTO */}
+      {modalFactura && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ background: "#fff", borderRadius: 6, padding: 32, width: 480, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ fontSize: 10, letterSpacing: 4, color: "#f0a500", textTransform: "uppercase", fontFamily: "'JetBrains Mono',monospace", marginBottom: 6 }}>Nueva factura detectada</div>
+            <div style={{ fontSize: 18, fontWeight: 600, color: "#1e293b", marginBottom: 4 }}>{modalFactura.cliente}</div>
+            <div style={{ fontSize: 13, color: "#64748b", marginBottom: 2 }}>{modalFactura.concepto}</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: "#1e293b", margin: "12px 0" }}>{new Intl.NumberFormat("es-ES", {style:"currency",currency:"EUR"}).format(modalFactura.total)}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16, padding: "12px 0", borderTop: "1px solid #f1f5f9", borderBottom: "1px solid #f1f5f9" }}>
+              <div><div style={{ fontSize: 9, color: "#94a3b8", letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace" }}>BASE</div><div style={{ fontSize: 13, fontWeight: 500 }}>{new Intl.NumberFormat("es-ES",{style:"currency",currency:"EUR"}).format(modalFactura.base)}</div></div>
+              <div><div style={{ fontSize: 9, color: "#94a3b8", letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace" }}>IVA</div><div style={{ fontSize: 13, fontWeight: 500 }}>{new Intl.NumberFormat("es-ES",{style:"currency",currency:"EUR"}).format(modalFactura.iva)}</div></div>
+              <div><div style={{ fontSize: 9, color: "#94a3b8", letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace" }}>FECHA</div><div style={{ fontSize: 13, fontWeight: 500 }}>{modalFactura.fecha}</div></div>
+              <div><div style={{ fontSize: 9, color: "#94a3b8", letterSpacing: 2, fontFamily: "'JetBrains Mono',monospace" }}>Nº FACTURA</div><div style={{ fontSize: 13, fontWeight: 500 }}>{modalFactura.numero}</div></div>
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 10, color: "#94a3b8", letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", textTransform: "uppercase", marginBottom: 8 }}>Asignar a proyecto (opcional)</div>
+              <select value={obraSeleccionada} onChange={e => setObraSeleccionada(e.target.value)} style={{ width: "100%", padding: "10px 14px", border: "1px solid #e2e8f0", borderRadius: 4, fontSize: 13, color: "#334155", outline: "none", background: "#fff" }}>
+                <option value="">— Sin proyecto —</option>
+                {(obras || []).filter(o => o.estado !== "Finalizada").map(o => (
+                  <option key={o.id} value={o.nombre}>{o.nombre}</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={confirmarFactura} style={{ flex: 1, background: "#f0a500", color: "#1e293b", border: "none", padding: "12px", cursor: "pointer", fontSize: 11, letterSpacing: 3, fontFamily: "'JetBrains Mono',monospace", fontWeight: "bold", borderRadius: 4, textTransform: "uppercase" }}>✓ Registrar gasto</button>
+              <button onClick={() => setModalFactura(null)} style={{ background: "none", border: "1px solid #e2e8f0", color: "#94a3b8", padding: "12px 20px", cursor: "pointer", fontSize: 11, fontFamily: "'JetBrains Mono',monospace", borderRadius: 4, textTransform: "uppercase" }}>Descartar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <div style={{ fontSize: 11, letterSpacing: 6, color: "#f0a500", textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace" }}>— Agente IA + Consultor</div>
       </div>
@@ -3103,14 +3248,14 @@ export default function FactuCloudApp() {
         {tab === "analitica" && <Analitica facturas={facturas} obras={obras} />}
         {tab === "tesoreria" && <Tesoreria facturas={facturas} movimientos={movimientosList} setMovimientos={setMovimientos} />}
         {tab === "informes" && <Informes facturas={facturas} obras={obras} proveedores={proveedores} clientes={clientes} />}
-        {tab === "obras" && <Obras obras={obras} setObras={setObrasState} clientes={clientes} facturas={facturas} />}
-        {tab === "proveedores" && <Proveedores proveedores={proveedores} setProveedores={setProveedoresState} />}
-        {tab === "clientes" && <Clientes clientes={clientes} setClientes={setClientesState} />}
+        {tab === "obras" && <Obras obras={obras} setObras={setObras} clientes={clientes} facturas={facturas} />}
+        {tab === "proveedores" && <Proveedores proveedores={proveedores} setProveedores={setProveedores} />}
+        {tab === "clientes" && <Clientes clientes={clientes} setClientes={setClientes} />}
         {tab === "nominas" && <Nominas empleados={empleados} setEmpleados={setEmpleados} />}
-        {tab === "presupuestos" && <Presupuestos facturas={facturas} setFacturas={setFacturasState} lista={presupuestosList} setLista={setPresupuestos} />}
-        {tab === "contabilidad" && <Contabilidad facturas={facturas} setFacturas={setFacturasState} empresa={empresa} clientes={clientes} proveedores={proveedores} />}
+        {tab === "presupuestos" && <Presupuestos facturas={facturas} setFacturas={setFacturas} lista={presupuestosList} setLista={setPresupuestos} />}
+        {tab === "contabilidad" && <Contabilidad facturas={facturas} setFacturas={setFacturas} empresa={empresa} clientes={clientes} proveedores={proveedores} />}
         {tab === "documentos" && <Documentos clientes={clientes} proveedores={proveedores} obras={obras} docs={documentosList} setDocs={setDocumentos} />}
-        {tab === "agente" && <Agente setFacturas={setFacturasState} facturas={facturas} clientes={clientes} obras={obras} proveedores={proveedores} setProveedores={setProveedoresState} />}
+        {tab === "agente" && <Agente setFacturas={setFacturas} facturas={facturas} clientes={clientes} obras={obras} proveedores={proveedores} setProveedores={setProveedores} />}
         {tab === "ajustes" && <Ajustes empresa={empresa} setEmpresa={emp => { setEmpresa(emp); try { localStorage.setItem("fc_empresa", JSON.stringify(emp)); } catch {} }} />}
       </div>
 
@@ -3428,6 +3573,8 @@ function Nominas({ empleados: empleadosProp, setEmpleados: setEmpleadosProp }) {
   const [gmailToken, setGmailToken] = useState(() => { try { return localStorage.getItem("fc_gmail_token"); } catch { return null; } });
   const [procesando, setProcesando] = useState(false);
   const [facturasAgente, setFacturasAgente] = useState([]);
+  const [modalFactura, setModalFactura] = useState(null); // factura pendiente de asignar proyecto
+  const [obraSeleccionada, setObraSeleccionada] = useState("");
 
   const conectarGmail = () => {
     const params = new URLSearchParams({ client_id: GMAIL_CLIENT_ID, redirect_uri: window.location.origin, response_type: "token", scope: GMAIL_SCOPE, prompt: "consent" });
@@ -3448,11 +3595,21 @@ function Nominas({ empleados: empleadosProp, setEmpleados: setEmpleadosProp }) {
   const procesarFacturasGmail = async () => {
     if (!gmailToken) return;
     setProcesando(true); setFacturasAgente([]);
+    // Cargar IDs ya procesados del localStorage
+    let procesadosIds;
+    try { procesadosIds = new Set(JSON.parse(localStorage.getItem("fc_gmail_procesados") || "[]")); } catch { procesadosIds = new Set(); }
     try {
-      const searchRes = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages?q=has:attachment+filename:pdf+newer_than:30d&maxResults=10", { headers: { Authorization: `Bearer ${gmailToken}` } });
+      // Solo emails de hoy
+      const hoy = new Date();
+      const fechaQuery = `${hoy.getFullYear()}/${String(hoy.getMonth()+1).padStart(2,"0")}/${String(hoy.getDate()).padStart(2,"0")}`;
+      const searchRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=has:attachment+filename:pdf+after:${fechaQuery}&maxResults=20`, { headers: { Authorization: `Bearer ${gmailToken}` } });
       if (!searchRes.ok) { setProcesando(false); setGmailToken(null); return; }
       const { messages = [] } = await searchRes.json();
-      for (const msg of messages.slice(0, 5)) {
+      // Filtrar los ya procesados
+      const nuevos = messages.filter(m => !procesadosIds.has(m.id));
+      if (nuevos.length === 0) { setFacturasAgente([{ proveedor: "Sin facturas nuevas hoy", registrada: false }]); setProcesando(false); return; }
+      for (const msg of nuevos.slice(0, 10)) {
+        procesadosIds.add(msg.id);
         const msgData = await (await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}`, { headers: { Authorization: `Bearer ${gmailToken}` } })).json();
         const subject = msgData.payload?.headers?.find(h => h.name === "Subject")?.value || "Sin asunto";
         const parts = msgData.payload?.parts || [];
@@ -3465,19 +3622,29 @@ function Nominas({ empleados: empleadosProp, setEmpleados: setEmpleadosProp }) {
         let factura;
         try { factura = JSON.parse((claudeData.content?.[0]?.text || "{}").replace(/```json|```/g, "").trim()); } catch { continue; }
         if (factura.proveedor && setProveedores) {
-          const existe = (proveedores || []).find(p => p.nombre === factura.proveedor);
+          const normalizar = s => (s || "").toLowerCase().trim().replace(/[.,\-_]/g, "");
+          const existe = (proveedores || []).find(p =>
+            (factura.cif && p.cif && p.cif === factura.cif) ||
+            normalizar(p.nombre) === normalizar(factura.proveedor)
+          );
           if (!existe) setProveedores(prev => [...prev, { id: Date.now(), nombre: factura.proveedor, cif: factura.cif || "", email: "", tel: "", categoria: "Otros", condicionesPago: "30 días", facturado: 0, pendiente: 0 }]);
         }
         if (setFacturas && factura.total > 0) {
-          const nuevaFact = { id: Date.now(), numero: factura.numeroFactura || `G-${Date.now()}`, cliente: factura.proveedor, concepto: factura.concepto || subject, fecha: factura.fecha || new Date().toLocaleDateString("es-ES"), base: factura.base || 0, iva: (factura.base || 0) * (factura.iva || 21) / 100, total: factura.total, estado: "Pendiente", tipo: "gasto", auto: true, origen: "gmail" };
-          setFacturas(prev => [...prev, nuevaFact]);
-          // Guardar en Supabase
-          const token = localStorage.getItem("fc_auth_token");
-          if (token) fetch(`${SUPABASE_URL}/rest/v1/facturas`, { method: "POST", headers: { "Content-Type": "application/json", "apikey": SUPABASE_KEY, "Authorization": `Bearer ${token}`, "Prefer": "return=minimal" }, body: JSON.stringify({ numero: nuevaFact.numero, cliente: nuevaFact.cliente, concepto: nuevaFact.concepto, fecha: nuevaFact.fecha, base: nuevaFact.base, iva: nuevaFact.iva, total: nuevaFact.total, estado: nuevaFact.estado, tipo: nuevaFact.tipo, auto: true, origen: "gmail" }) });
+          const nuevaFact = { id: Date.now(), numero: factura.numeroFactura || `G-${Date.now()}`, cliente: factura.proveedor, concepto: factura.concepto || subject, fecha: factura.fecha || new Date().toLocaleDateString("es-ES"), base: parseNum(factura.base), iva: parseNum(factura.iva) || parseNum(factura.base) * 0.21, total: parseNum(factura.total), estado: "Borrador", tipo: "gasto", auto: true, origen: "gmail" };
+          // Mostrar modal para asignar proyecto antes de registrar
+          const factDuplicada = factura.numeroFactura && (facturas || []).find(f => f.numero === factura.numeroFactura);
+          if (!factDuplicada) {
+            setModalFactura({ ...nuevaFact, _raw: factura });
+            setObraSeleccionada("");
+            // Esperar a que el usuario asigne proyecto (o cierre el modal)
+            await new Promise(r => setTimeout(r, 200));
+          }
         }
         setFacturasAgente(prev => [...prev, { ...factura, registrada: true }]);
         await new Promise(r => setTimeout(r, 500));
       }
+      // Guardar IDs procesados para evitar duplicados futuros
+      try { localStorage.setItem("fc_gmail_procesados", JSON.stringify([...procesadosIds])); } catch {}
     } catch {}
     setProcesando(false);
   };
@@ -4155,6 +4322,28 @@ function Tesoreria({ facturas, movimientos: movimientosProp, setMovimientos: set
   const [movimientosLocal, setMovimientosLocal] = useState([]);
   const movimientos = movimientosProp !== undefined ? movimientosProp : movimientosLocal;
   const setMovimientos = movimientosProp !== undefined ? setMovimientosProp : setMovimientosLocal;
+
+  // Combinar movimientos manuales + facturas registradas automáticamente
+  const movimientosDeFacturas = (facturas || [])
+    .filter(f => f.estado !== "Borrador" && f.estado !== "Anulada")
+    .map(f => ({
+      id: `fac-${f.id}`,
+      concepto: f.concepto || f.cliente || "Factura",
+      importe: f.tipo === "ingreso" ? (f.total || 0) : -(f.total || 0),
+      tipo: f.tipo === "ingreso" ? "cobro" : "pago",
+      fecha: f.fecha || "",
+      vencimiento: f.fechavencimiento || f.fechaVencimiento || "",
+      estado: f.estado === "Cobrada" || f.estado === "Pagada" ? "Completado" : "Pendiente",
+      categoria: f.tipo === "ingreso" ? "Clientes" : "Proveedores",
+      origen: "factura",
+      numeroFactura: f.numero || f.numeroFactura || "",
+    }));
+
+  // Todos los movimientos: manuales + de facturas (sin duplicados)
+  const todosMovimientos = [
+    ...movimientos.filter(m => !m.origen || m.origen !== "factura"),
+    ...movimientosDeFacturas,
+  ].sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
   const [nuevo, setNuevo] = useState(false);
   const [subtab, setSubtab] = useState("resumen");
   const [bancoConectado, setBancoConectado] = useState(() => {
@@ -4239,6 +4428,8 @@ function Tesoreria({ facturas, movimientos: movimientosProp, setMovimientos: set
   const [gmailToken, setGmailToken] = useState(() => { try { return localStorage.getItem("fc_gmail_token"); } catch { return null; } });
   const [procesando, setProcesando] = useState(false);
   const [facturasAgente, setFacturasAgente] = useState([]);
+  const [modalFactura, setModalFactura] = useState(null); // factura pendiente de asignar proyecto
+  const [obraSeleccionada, setObraSeleccionada] = useState("");
 
   const conectarGmail = () => {
     const params = new URLSearchParams({ client_id: GMAIL_CLIENT_ID, redirect_uri: window.location.origin, response_type: "token", scope: GMAIL_SCOPE, prompt: "consent" });
@@ -4259,11 +4450,21 @@ function Tesoreria({ facturas, movimientos: movimientosProp, setMovimientos: set
   const procesarFacturasGmail = async () => {
     if (!gmailToken) return;
     setProcesando(true); setFacturasAgente([]);
+    // Cargar IDs ya procesados del localStorage
+    let procesadosIds;
+    try { procesadosIds = new Set(JSON.parse(localStorage.getItem("fc_gmail_procesados") || "[]")); } catch { procesadosIds = new Set(); }
     try {
-      const searchRes = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages?q=has:attachment+filename:pdf+newer_than:30d&maxResults=10", { headers: { Authorization: `Bearer ${gmailToken}` } });
+      // Solo emails de hoy
+      const hoy = new Date();
+      const fechaQuery = `${hoy.getFullYear()}/${String(hoy.getMonth()+1).padStart(2,"0")}/${String(hoy.getDate()).padStart(2,"0")}`;
+      const searchRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=has:attachment+filename:pdf+after:${fechaQuery}&maxResults=20`, { headers: { Authorization: `Bearer ${gmailToken}` } });
       if (!searchRes.ok) { setProcesando(false); setGmailToken(null); return; }
       const { messages = [] } = await searchRes.json();
-      for (const msg of messages.slice(0, 5)) {
+      // Filtrar los ya procesados
+      const nuevos = messages.filter(m => !procesadosIds.has(m.id));
+      if (nuevos.length === 0) { setFacturasAgente([{ proveedor: "Sin facturas nuevas hoy", registrada: false }]); setProcesando(false); return; }
+      for (const msg of nuevos.slice(0, 10)) {
+        procesadosIds.add(msg.id);
         const msgData = await (await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}`, { headers: { Authorization: `Bearer ${gmailToken}` } })).json();
         const subject = msgData.payload?.headers?.find(h => h.name === "Subject")?.value || "Sin asunto";
         const parts = msgData.payload?.parts || [];
@@ -4276,25 +4477,35 @@ function Tesoreria({ facturas, movimientos: movimientosProp, setMovimientos: set
         let factura;
         try { factura = JSON.parse((claudeData.content?.[0]?.text || "{}").replace(/```json|```/g, "").trim()); } catch { continue; }
         if (factura.proveedor && setProveedores) {
-          const existe = (proveedores || []).find(p => p.nombre === factura.proveedor);
+          const normalizar = s => (s || "").toLowerCase().trim().replace(/[.,\-_]/g, "");
+          const existe = (proveedores || []).find(p =>
+            (factura.cif && p.cif && p.cif === factura.cif) ||
+            normalizar(p.nombre) === normalizar(factura.proveedor)
+          );
           if (!existe) setProveedores(prev => [...prev, { id: Date.now(), nombre: factura.proveedor, cif: factura.cif || "", email: "", tel: "", categoria: "Otros", condicionesPago: "30 días", facturado: 0, pendiente: 0 }]);
         }
         if (setFacturas && factura.total > 0) {
-          const nuevaFact = { id: Date.now(), numero: factura.numeroFactura || `G-${Date.now()}`, cliente: factura.proveedor, concepto: factura.concepto || subject, fecha: factura.fecha || new Date().toLocaleDateString("es-ES"), base: factura.base || 0, iva: (factura.base || 0) * (factura.iva || 21) / 100, total: factura.total, estado: "Pendiente", tipo: "gasto", auto: true, origen: "gmail" };
-          setFacturas(prev => [...prev, nuevaFact]);
-          // Guardar en Supabase
-          const token = localStorage.getItem("fc_auth_token");
-          if (token) fetch(`${SUPABASE_URL}/rest/v1/facturas`, { method: "POST", headers: { "Content-Type": "application/json", "apikey": SUPABASE_KEY, "Authorization": `Bearer ${token}`, "Prefer": "return=minimal" }, body: JSON.stringify({ numero: nuevaFact.numero, cliente: nuevaFact.cliente, concepto: nuevaFact.concepto, fecha: nuevaFact.fecha, base: nuevaFact.base, iva: nuevaFact.iva, total: nuevaFact.total, estado: nuevaFact.estado, tipo: nuevaFact.tipo, auto: true, origen: "gmail" }) });
+          const nuevaFact = { id: Date.now(), numero: factura.numeroFactura || `G-${Date.now()}`, cliente: factura.proveedor, concepto: factura.concepto || subject, fecha: factura.fecha || new Date().toLocaleDateString("es-ES"), base: parseNum(factura.base), iva: parseNum(factura.iva) || parseNum(factura.base) * 0.21, total: parseNum(factura.total), estado: "Borrador", tipo: "gasto", auto: true, origen: "gmail" };
+          // Mostrar modal para asignar proyecto antes de registrar
+          const factDuplicada = factura.numeroFactura && (facturas || []).find(f => f.numero === factura.numeroFactura);
+          if (!factDuplicada) {
+            setModalFactura({ ...nuevaFact, _raw: factura });
+            setObraSeleccionada("");
+            // Esperar a que el usuario asigne proyecto (o cierre el modal)
+            await new Promise(r => setTimeout(r, 200));
+          }
         }
         setFacturasAgente(prev => [...prev, { ...factura, registrada: true }]);
         await new Promise(r => setTimeout(r, 500));
       }
+      // Guardar IDs procesados para evitar duplicados futuros
+      try { localStorage.setItem("fc_gmail_procesados", JSON.stringify([...procesadosIds])); } catch {}
     } catch {}
     setProcesando(false);
   };
 
-  const cobros = movimientos.filter(m => m.tipo === "cobro");
-  const pagos = movimientos.filter(m => m.tipo === "pago");
+  const cobros = todosMovimientos.filter(m => m.tipo === "cobro");
+  const pagos = todosMovimientos.filter(m => m.tipo === "pago");
   const totalCobros = cobros.reduce((s, m) => s + parseFloat(m.importe || 0), 0);
   const totalPagos = pagos.reduce((s, m) => s + parseFloat(m.importe || 0), 0);
   const saldoPrevisto = totalCobros - totalPagos;
@@ -4311,7 +4522,7 @@ function Tesoreria({ facturas, movimientos: movimientosProp, setMovimientos: set
     return new Date(str);
   };
 
-  const en30 = movimientos.filter(m => {
+  const en30 = todosMovimientos.filter(m => {
     const f = parseFecha(m.vencimiento);
     if (!f) return false;
     const diff = (f - hoy) / (1000 * 60 * 60 * 24);
@@ -4338,11 +4549,11 @@ function Tesoreria({ facturas, movimientos: movimientosProp, setMovimientos: set
       const fecha = parseFecha(f.fecha);
       return f.tipo === "ingreso" && fecha && fecha >= inicio && fecha <= fin;
     }).reduce((s, f) => s + (f.total || 0), 0);
-    const cobrosMovs = movimientos.filter(m => {
+    const cobrosMovs = todosMovimientos.filter(m => {
       const fecha = parseFecha(m.vencimiento);
       return m.tipo === "cobro" && fecha && fecha >= inicio && fecha <= fin;
     }).reduce((s, m) => s + parseFloat(m.importe || 0), 0);
-    const pagosMovs = movimientos.filter(m => {
+    const pagosMovs = todosMovimientos.filter(m => {
       const fecha = parseFecha(m.vencimiento);
       return m.tipo === "pago" && fecha && fecha >= inicio && fecha <= fin;
     }).reduce((s, m) => s + parseFloat(m.importe || 0), 0);
@@ -4541,7 +4752,7 @@ function Tesoreria({ facturas, movimientos: movimientosProp, setMovimientos: set
               <div key={m.id} style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderLeft: `3px solid ${m.tipo === "cobro" ? "#4caf7d" : "#e05252"}`, padding: "16px 22px", marginBottom: 10, borderRadius: 2, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <div style={{ fontSize: 14, color: "#1e293b", marginBottom: 3 }}>{m.concepto}</div>
-                  <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'JetBrains Mono', monospace" }}>{m.categoria} · Vence: {m.vencimiento || "Sin fecha"} {m.origen === "banco" ? "· 🏦 Importado" : ""}</div>
+                  <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'JetBrains Mono', monospace" }}>{m.categoria} · {m.fecha || "Sin fecha"} {m.vencimiento ? `· Vence: ${m.vencimiento}` : ""} {m.origen === "banco" ? "· 🏦 Importado" : m.origen === "factura" ? `· 📄 ${m.numeroFactura || "Factura"}` : ""}</div>
                 </div>
                 <div style={{ textAlign: "right" }}>
                   <div style={{ fontSize: 20, color: m.tipo === "cobro" ? "#4caf7d" : "#e05252", marginBottom: 4 }}>{m.tipo === "cobro" ? "+" : "-"}{formatEURLocal(m.importe)}</div>
@@ -4948,6 +5159,30 @@ function Informes({ facturas, obras, proveedores, clientes }) {
         ))}
       </div>
 
+      {/* Panel resumen de datos disponibles */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 16 }}>
+        {[
+          { label: "Facturas", valor: facturas.length, icon: "📄", ok: facturas.length > 0 },
+          { label: "Proyectos", valor: obras.length, icon: "🏗", ok: obras.length > 0 },
+          { label: "Clientes", valor: clientes.length, icon: "👥", ok: clientes.length > 0 },
+          { label: "Proveedores", valor: proveedores.length, icon: "🏭", ok: proveedores.length > 0 },
+        ].map(d => (
+          <div key={d.label} style={{ background: d.ok ? "#f0fff4" : "#fff8f0", border: `1px solid ${d.ok ? "#4caf7d33" : "#f0a50033"}`, borderRadius: 3, padding: "12px 16px", display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 20 }}>{d.icon}</span>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: d.ok ? "#4caf7d" : "#f0a500" }}>{d.valor}</div>
+              <div style={{ fontSize: 9, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2 }}>{d.label.toUpperCase()}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {facturas.length === 0 && obras.length === 0 && (
+        <div style={{ background: "#fff8f0", border: "1px solid #f0a50033", borderRadius: 3, padding: "14px 20px", marginBottom: 16, fontSize: 12, color: "#92400e", fontFamily: "'JetBrains Mono',monospace" }}>
+          ⚠ Sin datos suficientes. Registra facturas y proyectos en Contabilidad y Proyectos para generar informes con datos reales.
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: 10, marginBottom: 24 }}>
         <button onClick={generarInforme} disabled={loading} style={{ background: loading ? "#e2e8f0" : "#f0a500", color: loading ? "#444" : "#f8f9fa", border: "none", padding: "12px 32px", cursor: loading ? "not-allowed" : "pointer", fontSize: 11, letterSpacing: 4, textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace", fontWeight: "bold", borderRadius: 2 }}>
           {loading ? "⟳ Generando informe..." : `✦ Generar ${TIPOS_INFORME.find(t => t.id === tipoSeleccionado)?.label}`}
@@ -5246,6 +5481,29 @@ function Analitica({ facturas, obras }) {
 
   return (
     <div>
+      {/* Aviso sin datos */}
+      {!hayDatos && (
+        <div style={{ background: "#fff8f0", border: "1px solid #f0a50033", borderRadius: 3, padding: "14px 20px", marginBottom: 16, fontSize: 12, color: "#92400e", fontFamily: "'JetBrains Mono',monospace" }}>
+          ⚠ Sin datos suficientes. Los gráficos se generarán automáticamente cuando registres facturas en Contabilidad.
+        </div>
+      )}
+      {hayDatos && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 16 }}>
+          {[
+            { label: "Facturas", valor: facturas.length, icon: "📄" },
+            { label: "Ingresos", valor: new Intl.NumberFormat("es-ES",{style:"currency",currency:"EUR",maximumFractionDigits:0}).format(totalIngresos), icon: "📈" },
+            { label: "Gastos", valor: new Intl.NumberFormat("es-ES",{style:"currency",currency:"EUR",maximumFractionDigits:0}).format(totalGastos), icon: "📉" },
+          ].map(d => (
+            <div key={d.label} style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 3, padding: "12px 16px", display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 20 }}>{d.icon}</span>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "#1e293b" }}>{d.valor}</div>
+                <div style={{ fontSize: 9, color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace", letterSpacing: 2 }}>{d.label.toUpperCase()}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
         <div style={{ fontSize: 11, letterSpacing: 6, color: "#f0a500", textTransform: "uppercase", fontFamily: "'JetBrains Mono', monospace" }}>— Analítica y gráficas</div>
         <div style={{ display: "flex", gap: 6 }}>
